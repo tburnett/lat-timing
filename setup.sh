@@ -1,26 +1,20 @@
 #!/bin/bash
 # Setup for ipython or jopyterlab
 
-# if for anaconda
-export MYCONDA=/nfs/farm/g/glast/u/burnett/anaconda2
+# path to  anaconda
+myconda=/nfs/farm/g/glast/u/burnett/anaconda2
 
-# pointlike uses $FERMI to find default paths for data, diffuse, catalog files
-export FERMI=$pointlike/fermi
+#use  anaconda for executables 
+export PATH=${myconda}/bin:${PATH}
 
-
-#optionally override pointlike/python/uw
-#export PYTHONPATH=.:${PYTHONPATH}
-
-#special to use current anaconda
-export PATH=${MYCONDA}/bin:${PATH}
-
-# use a local matplotlib configuration. Important for batch to use agg at least
-#export MPLCONFIGDIR=$pointlike/.matplotlib
-
+# to start a jupyter lab server - note the port
+# to connect from a remote computer, run ssh -N -f -L localhost:<localport>:localhost:8890 <userid>@rhel6-64x.slac.stanford.edu
+alias jupyterlab='jupyter lab --notebook-dir=/nfs/farm/g/glast/u/burnett/analysis/agn_timing --port=8890 --no-browser'
 
 # should prevent core dumps when run in batch
 ulimit -c 0
 
 if [ "$PS1" ]; then
-  echo "MYPYTHON :" $mypython
+  echo "CONDA :" $myconda
+  alias
 fi
