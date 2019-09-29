@@ -100,7 +100,7 @@ class TimeDiff(object):
             ax1.grid(alpha=0.5);
             ax1.set(xlabel='time difference bin', ylim=(0,None))
 
-            ax2.plot(range(1, len(self.power)), self.power[1:], 'o');
+            ax2.plot(list(range(1, len(self.power))), self.power[1:], 'o');
             ax2.grid(alpha=0.5);
             ax2.set(xlabel='DFT bin', ylabel='Power')
             fig.suptitle('Processing: window size: {}, max_freq: {}'.format(window_size, self.max_freq))

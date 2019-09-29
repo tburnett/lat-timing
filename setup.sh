@@ -1,8 +1,9 @@
 #!/bin/bash
-# Setup for ipython or jopyterlab
+# Setup for ipython or jupyterlab
 
 # path to  anaconda
-myconda=/nfs/farm/g/glast/u/burnett/anaconda2
+# enable if not done in .bashrc
+#myconda=/nfs/farm/g/glast/u/burnett/anaconda3
 
 #use  anaconda for executables 
 export PATH=${myconda}/bin:${PATH}

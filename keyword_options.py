@@ -6,7 +6,6 @@ Support for generating doc strings, and setting keyword options for class constr
 Author: T. Burnett <tburnett@uw.edu>
 """
 import copy
-import types 
 import textwrap
 
 ##
@@ -36,14 +35,14 @@ def decorate(defaults):
     def decorator(func):
         s= hbar+ indent+'keyword arguments'+ hbar
         for item in defaults:
-            if type(item)==types.StringType:
+            if type(item)==str:
                 s+= '\n%s%s    %s'% (indent,10*'=',item.upper())
                 continue
             if len(item)==3:
                 key, value, description = item 
             else:
                 (key, value), description = item, ''
-            if type(value)==types.StringType:
+            if type(value)==bytes:
                 value = "'" + value + "'"
             s += indent+'%-15s' % key
             if len(key)>=15: s += indent + 15*' '
@@ -68,14 +67,14 @@ def process(self, kwargs, defaults=None):
     Raises KeyError exception for any kwargs entry not in the defaults list
     """
     for item in self.defaults if defaults is None else defaults:
-        if type(item)==types.StringType: continue
+        if type(item)==bytes: continue
         self.__dict__[item[0].strip()] = item[1]
         
-    for key in kwargs.keys():
+    for key in list(kwargs.keys()):
         if key in self.__dict__: self.__dict__[key]=kwargs[key]
         else:
-            raise KeyError, "option '%s' not recognized by %s: expect one of:%s"\
-            % (key,self.__class__.__name__, sorted(self.__dict__.keys()))
+            raise KeyError("option '%s' not recognized by %s: expect one of:%s"\
+            % (key,self.__class__.__name__, sorted(self.__dict__.keys())))
 
 
 def defaults_to_kwargs(obj,default_object):
@@ -117,7 +116,7 @@ def current_parameter_table(self, indent = '\n', hbar=60*'='):
     """
     s= hbar+ indent+self.__class__.__name__+'  parameters'+ indent+hbar
     for item in self.defaults:
-        if type(item)==types.StringType:
+        if type(item)==bytes:
             s+= '\n%s%s    %s'% (indent,10*'=',item.upper())
             continue
         if len(item)==3:
@@ -125,7 +124,7 @@ def current_parameter_table(self, indent = '\n', hbar=60*'='):
         else:
             (key, value), description = item, ''
         value = self.__dict__[key]  # could indicate changed?
-        if type(value)==types.StringType:
+        if type(value)==bytes:
             value = "'" + value + "'"
         s += indent+'%-15s' % key
         if len(key)>=15: s += indent + 15*' '
