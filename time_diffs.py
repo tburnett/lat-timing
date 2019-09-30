@@ -1,5 +1,5 @@
 """
-Develop alternate code to apply the Atwood time-differencing algorithm
+Code to apply the Atwood time-differencing algorithm
 """
 
 import os, sys
@@ -18,10 +18,10 @@ class TimeDiff(object):
         ('viewing_period', 1000, 'number of days total'), 
 
         'Simulation',
-        ('noise_rate'  ,0.2,   'noise photons/day'), 
-        ('agn_period'  ,100.,  'QPO period in days'),  
-        ('phase_width' , 0.05, 'spread in phase'),
-        ('signal_count', 20,   'average number of counts per cycle'),
+        ('noise_rate'  ,0.4,   'noise photons/day'), 
+        ('agn_period'  , 50.,  'QPO period in days'),  
+        ('phase_width' , 0.1, 'spread in phase'),
+        ('signal_count', 25,   'average number of counts per cycle'),
 
         'Analysis',
         ('window_size' , 400,  'window size in days'),
@@ -38,13 +38,10 @@ class TimeDiff(object):
 
         """
         keyword_options.process(self, kwargs)
-        self.dataset = dataset
-
-        self.fft_size = 2 * int(np.floor(self.window_size * self.max_freq))
-        self.time_resol = 0.5/self.max_freq
-
-        if dataset is None:
-            self.dataset=self.simulate()
+        
+        # set up data, either real of run a simulation
+        self.simulated = dataset is None
+        self.dataset = self.simulate() if self.simulated else dataset 
 
         if 'weight' not in self.dataset.columns: self.use_weights=False
         if self.make_plots:
@@ -65,45 +62,62 @@ class TimeDiff(object):
         if self.make_plots:
 
             nbins = self.viewing_period/self.binsize
-            fig,ax = plt.subplots(figsize=(10,3))
+            fig,ax = plt.subplots(figsize=(10,3), gridspec_kw=dict(right=0.95))
             hkw = dict(bins=np.linspace(0, self.viewing_period, nbins), histtype='step',lw=2)
             ax.hist(time_data, label='all photons', **hkw )
             ax.hist(signal,     label='signal', **hkw);
             ax.set(xlabel='Elapsed time [day]', ylabel='counts / {} days'.format(self.binsize))
             ax.legend();
             ax.set_title('Simulation: {} background and {} signal photons'.format(
-                len(background),len(signal)))
+                len(background),len(signal)),loc='left')
 
         return pd.DataFrame([time_data], index=['time']).T
 
-
-    def __call__(self, window_size=None):
+    def __call__(self, window_size=None, max_freq=None):
         """ Run the time-differencing, then FFT
         """
-        time_data=self.dataset.time.values
+        
         if window_size is None: window_size=self.window_size
- 
-        td = np.zeros(self.fft_size)
+        if max_freq is None: max_freq=self.max_freq
+            
+        fft_size = 2 * int(np.floor(window_size * max_freq))
+
+        # generate time differences
+        time_data=self.dataset.time.values 
+        td = np.zeros(fft_size)
         for i1,t1 in enumerate(time_data):
             b = np.searchsorted(time_data, ( t1+window_size))
             t2 = time_data[i1+1:b]
-            fb = np.floor((t2-t1)/self.time_resol).astype(int)
+            fb = np.floor((t2-t1)*max_freq*2).astype(int)
             td[fb] += weights[i1]*weights[i1+1:b] if self.use_weights else 1
         
+        # run FFT
         norm = np.sum(np.absolute(td)/2.0, dtype=np.float32) 
         output_array = np.fft.rfft(td)
-        self.power =np.square(np.absolute(output_array)) / norm
+        power =np.square(np.absolute(output_array)) / norm
 
         if self.make_plots:
-            fig,(ax1,ax2) = plt.subplots(2,1, figsize=(10,8), gridspec_kw=dict(hspace=0.3,top=0.95)  )
-            ax1.plot(td, 'o');
+            fig,(ax1,ax2) = plt.subplots(2,1, figsize=(10,8), gridspec_kw=dict(
+                hspace=0.3,top=0.92,left=0.05)  )
+            
+            time_bin = window_size/fft_size
+            times=np.linspace(0.5, fft_size-0.5, fft_size)*time_bin
+            ax1.plot(times, td, '+');
             ax1.grid(alpha=0.5);
-            ax1.set(xlabel='time difference bin', ylim=(0,None))
-
-            ax2.plot(list(range(1, len(self.power))), self.power[1:], 'o');
+            ax1.set(xlabel='time difference [days]', ylim=(0,None), 
+                    ylabel='Entries per {:.1f} day'.format(time_bin))
+            
+            deltaf= max_freq/fft_size*2
+            freq = np.linspace(0.5, fft_size/2-0.5, fft_size/2)*deltaf
+            ax2.plot( freq, power[1:], 'o', label='')
             ax2.grid(alpha=0.5);
-            ax2.set(xlabel='DFT bin', ylabel='Power')
-            fig.suptitle('Processing: window size: {}, max_freq: {}'.format(window_size, self.max_freq))
+            ax2.set(xlabel='Frequency [1/day]', ylabel='Power',yscale='log')
+            if self.simulated:
+                ax2.axvline(1/self.agn_period, color='red', ls=':', label='simulated frequency')
+                ax2.legend()
+                
+            fig.suptitle('Processing: window size={}, max_freq={}'.format(
+                window_size, max_freq),  ha='right')
 
 
     def list_parameters(self):
