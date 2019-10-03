@@ -13,6 +13,7 @@ T. Burnett mods to avoid ScienceTools and convert to python 3
 """
 import numpy as np
 from astropy.io import fits
+from astropy.coordinates import SkyCoord
 from math import sin,cos
 #from uw.like import pycaldb
 #from uw.utilities import keyword_options
@@ -25,6 +26,11 @@ from scipy.interpolate import interp1d,interp2d
 from collections import deque
 
 DEG2RAD = np.pi/180.
+
+def fk5_in_radians(skycoord):
+    assert type(skycoord)==SkyCoord, 'wrong type'
+    infk5 = skycoord.fk5
+    return np.radians([infk5.ra.value, infk5.dec.value])
 
 class Binning(object):
     """ Specify the binning for a livetime calculation."""
@@ -364,9 +370,12 @@ class Livetime(object):
             
             binning can also be passed as an integer, in which case it
             is assumed to specify the number of polar bins from
-            theta_cut to 1, and no binning in time or azimuth is performed."""
+            theta_cut to 1, and no binning in time or azimuth is performed.
+        skydir : an astropy.coordinates.SkyCoord object     
+        """
       
-        ra,dec = DEG2RAD*skydir[0], DEG2RAD*skydir[1] ### convert 
+        ra,dec = fk5_in_radians(skydir) #DEG2RAD*skydir.ra(), DEG2RAD*skydir.dec() ### convert 
+
         if np.isscalar(binning):
             binning = Binning(theta_bins=np.linspace(theta_cut,1,binning+1))
         if (ra==self.prev_ra) and (dec==self.prev_dec) and binning.equals(self.prev_binning):
@@ -536,21 +545,22 @@ class EffectiveArea(object):
     defaults = (
         #('irf','P6_v3_diff','IRF to use'),
         #('irf','P7SOURCE_V6','IRF to use'),
-        ('irf','P8R2_SOURCE_V6','IRF to use'),
+        ('irf','P8R3_SOURCE_V2','IRF to use'),
         ('CALDB',None,'path to override environment variable'),
         ('use_phidep',False,'use azmithual dependence for effective area'),
-        ('aeff_file', '/afs/slac/g/glast/groups/canda/irfs/'
-        'p8_merit/P8R3_V2/CALDB/data/glast/lat/bcf/ea/aeff_P8R3_SOURCE_V2_FB.fits', 'wired-in filename'),
         )
 
     @keyword_options.decorate(defaults)
     def __init__(self,**kwargs):
         keyword_options.process(self,kwargs)
         #ct0_file,ct1_file = get_irf_file(self.irf,CALDB=self.CALDB)
-        print(f'Effective area setep {kwargs}')
-
+        if self.CALDB is None:
+            self.CALDB=os.environ['CALDB']
+ 
         ##cdbm = pycaldb.CALDBManager(self.irf)
-        ct0_file = ct1_file = self.aeff_file ##cdbm.get_aeff()
+        aeff_file = f'{self.CALDB}/data/glast/lat/bcf/ea/aeff_{self.irf}_FB.fits'
+        assert os.path.exists(aeff_file), f'Effective area file {aeff_file} not found'
+        ct0_file = ct1_file = aeff_file ##cdbm.get_aeff()
         self._read_aeff(ct0_file,ct1_file)
         if self.use_phidep:
             self._read_phi(ct0_file,ct1_file)
@@ -606,7 +616,7 @@ class EffectiveArea(object):
             NB -- if e and c are both arrays, they must be of the same
                   size; in other words, no outer product is taken
         """
-        print(f'Eff call: ({e,c})'); #return
+        #print(f'Eff call: ({e,c})'); #return
         e = np.log10(e)
         at = self.aeff
         if event_class == -1:
