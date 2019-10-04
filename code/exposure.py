@@ -12,22 +12,22 @@ author(s): Matthew Kerr
 T. Burnett mods to avoid ScienceTools and convert to python 3
 """
 import numpy as np
+import pandas as pd
 from astropy.io import fits
 from astropy.coordinates import SkyCoord
-from math import sin,cos
-#from uw.like import pycaldb
-#from uw.utilities import keyword_options
-#from skymaps import Gti,Healpix,SkyDir
-#import skymaps
+from scipy.integrate import simps
+#from math import sin,cos
+
 import keyword_options
 
 import os
-from scipy.interpolate import interp1d,interp2d
-from collections import deque
+#from scipy.interpolate import interp1d,interp2d
+
 
 DEG2RAD = np.pi/180.
 
 def fk5_in_radians(skycoord):
+    """returns an [ra,dec] array, from the SkyCoord object, in radians """
     assert type(skycoord)==SkyCoord, 'wrong type'
     infk5 = skycoord.fk5
     return np.radians([infk5.ra.value, infk5.dec.value])
@@ -78,7 +78,10 @@ class Livetime(object):
         ('remove_zeros',True,'remove bins with 0 livetime'),
         ('fast_ft2',True,'use fast algorithm for calculating GTI overlaps'),
         ('override_ltfrac',None,'use this livetime fraction instead of FT2 vals'),
-        ('deadtime',False,'accumulate deadtime instead of livetime')
+        ('deadtime',False,'accumulate deadtime instead of livetime'),
+        'Cuts corresponding to data selection',
+        ('cos_theta_max', 0.4, 'cosine of maximum S/C theta'),
+        ('z_max', 100, 'maximum angle between zenith and S/C bore'),
     )
 
     @keyword_options.decorate(defaults)
@@ -324,29 +327,26 @@ class Livetime(object):
         for field in self.fields:
             self.__dict__[field] = self.__dict__[field][mask]
 
-    def get_cosines(self,ra,dec,theta_cut,zenith_cut,get_phi=False):
+    def get_cosines(self, skycoord, get_phi=False):
         """ Return the cosine of the arclength between the specified 
             direction and the S/C z-axis and [optionally] the azimuthal
             orientation as a cosine.
 
-        ra -- right ascention (radians)
-        dec -- declination (radians)
-        theta_cut -- cosine(theta_max)
-        zenith_cut -- cosine(zenith_max)
+        skycood == a SkyCoord object
 
         Returns:
         mask -- True if the FT2 interval satisfies the specified cuts
         pcosines -- cosines of polar angles
         acosines -- cosines of azimuthal angles [optional]
         """    
+        ra,dec = fk5_in_radians(skycoord)
         ra_s,ra_z = self.RA_SCZ,self.RA_ZENITH
-        cdec,sdec = cos(dec),sin(dec)
+        cdec,sdec = np.cos(dec), np.sin(dec)
         # cosine(polar angle) of source in S/C system
         pcosines  = self.COS_DEC_SCZ*cdec*np.cos(ra-self.RA_SCZ) + self.SIN_DEC_SCZ*sdec
-        mask = pcosines >= theta_cut
-        if zenith_cut > -1:
-            zcosines = self.COS_DEC_ZENITH*cdec*np.cos(ra-self.RA_ZENITH) + self.SIN_DEC_ZENITH*sdec
-            mask = mask & (zcosines>=zenith_cut)
+        mask = pcosines >= self.cos_theta_max
+        zcosines = self.COS_DEC_ZENITH*cdec*np.cos(ra-self.RA_ZENITH) + self.SIN_DEC_ZENITH*sdec
+        mask = mask & (zcosines>=np.cos(np.radians(self.z_max)))
         pcosines = pcosines[mask]
         if get_phi:
             ra_s = self.RA_SCX[mask]
@@ -399,6 +399,41 @@ class Livetime(object):
         mask[mask] = timestamps > self.gti_starts[event_idx[mask]]
         print('gti mask: %d/%d'%(mask.sum(),len(mask)))
         return mask
+
+    def get_exposure(self, skycoord, base_spectrum=None,   edom = np.logspace(2,5,13) ):
+        """ Determine exposure associated with given direction for each gti interval
+
+        return a dataframe with exposure info for the given position
+        """
+        
+        if base_spectrum is None:
+            base_spectrum = lambda E: (E/1000)**-2.1 
+        ea = EffectiveArea()
+
+        mask,pcosines, acosines = self.get_cosines(skycoord)
+        wts = base_spectrum(edom) 
+        total_exposure = np.empty_like(edom) 
+        wts = base_spectrum(edom) 
+        rvals = np.empty([len(edom),len(pcosines)]) 
+        for i,(en,wt) in enumerate(zip(edom,wts)): 
+            faeff,baeff = ea([en],pcosines) 
+            rvals[i] = (faeff+baeff)*wt 
+            total_exposure[i] = rvals[i].sum()/wt 
+            aeff = simps(rvals,edom,axis=0)/simps(wts,edom)
+
+        # Then an exposure:
+        exposure = np.zeros(len(mask))
+        exposure[mask] = aeff*self.LIVETIME[mask]
+        full_mask=mask
+        #Finally get a list of start/stop/exposure for all non-zero entries:
+        tstart = self.START[full_mask]
+        tstop  = self.STOP[full_mask]
+        mexposure = exposure[full_mask]
+        #cexposure = np.cumsum(mexposure)
+        if self.verbose>0:
+            print(f'time range: {tstart[0]:.0f} to {tstop[-1]:.0f}')
+        return pd.DataFrame(dict(tstart=tstart,tstop=tstop, exposure=mexposure))
+
 
 class BinnedLivetime(Livetime):
     """See remarks for Livetime class for general information.
