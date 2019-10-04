@@ -1,5 +1,8 @@
-# Search for AGN QPO evidence
+# Develop and apply code using timing of Fermi-LAT sources
 
-Basic idea: use the time-differencing procedure of W. B. Atwood, APJ 652:L49–L52, 2006 November 20
+Code is in python 3, making it necessarily independent of the Fermi ScienceTools for now.
 
-See python 3 code in the code folder, and some notebooks in notebooks
+References
+* time-differencing procedure of W. B. Atwood, APJ 652:L49–L52, 2006 November 20 to AGN flares
+* Weighted photon analysis of M. Kerr  [https://arxiv.org/pdf/1910.00140.pdf]
+
