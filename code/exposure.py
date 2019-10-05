@@ -431,7 +431,7 @@ class Livetime(object):
         mexposure = exposure[full_mask]
         #cexposure = np.cumsum(mexposure)
         if self.verbose>0:
-            print(f'time range: {tstart[0]:.0f} to {tstop[-1]:.0f}')
+            print(f'Exposure time range: {tstart[0]:.0f} to {tstop[-1]:.0f}')
         return pd.DataFrame(dict(tstart=tstart,tstop=tstop, exposure=mexposure))
 
 
