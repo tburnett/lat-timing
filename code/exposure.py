@@ -72,7 +72,7 @@ class Livetime(object):
 
     defaults = (
         ('verbose',1,'verbosity level'),
-        ('gti_mask',None,'additional excisions'),
+       #not (re)implemented yet ('gti_mask',None,'additional excisions'),
         ('tstart',0,'lower time limit in MET'),
         ('tstop',1e100,'upper time limit in MET'),
         ('remove_zeros',True,'remove bins with 0 livetime'),
@@ -112,7 +112,7 @@ class Livetime(object):
             intersection with the (optional) gti_mask and the time limits.
         """
         if self.verbose >= 1: print('Processing GTI...')
-        #if not hasattr(ft1files,'__iter__'): ft1files = [ft1files]
+        if type(ft1files)==str: ft1files = [ft1files]
         # gti = self.gti = Gti(ft1files[0])
         # if len(ft1files) > 1:
         #     for ft1 in ft1files[1:]: gti.combine(Gti(ft1))
@@ -131,13 +131,23 @@ class Livetime(object):
         # if self.verbose >= 1:
         #     print('Finished computing GTI from FT1 files; total ontime = %ds'%(
         #             round(gti.computeOntime())))
-        ################### Simple processing for one file ###############
-        gti_data = fits.open(ft1files)['GTI'].data
-        self.gti_starts = starts= gti_data.START
-        self.gti_stops  = stops = gti_data.STOP
-        self.LIVETIME = (stops-starts).sum()
+        ### following instead of above to avoid ScienceTools pointlike.Gti class. but should gti_mask?
+        starts=[] 
+        stops=[]
+        for i, ft1 in enumerate(ft1files):
+            with fits.open(ft1) as hdu: 
+                gti_data = hdu['GTI'].data
+                start = gti_data.START
+                if i>0:
+                    assert start[0]>= stops[-1][-1], f'file {ft1} has start time not following preceding file'
+                starts.append(start)
+                stops.append( gti_data.STOP)
+        self.gti_starts = np.concatenate(starts)
+        self.gti_stops = np.concatenate(stops)
+        self.LIVETIME = (self.gti_stops-self.gti_starts).sum()
         if self.verbose>0:
-            print( f'Processed {len(starts)} intervals with {self.LIVETIME:.0f} s live time')
+            print( f'Processed {len(ft1files)} GTI files wtth {len(self.gti_starts)} intervals with'\
+                   f' {int(self.LIVETIME):,} s live time')
 
     def _update_gti(self):
         """ Trim GTI to FT2 boundaries.
@@ -205,34 +215,57 @@ class Livetime(object):
     def _setup_ft2(self,ft2files):
         """Load in the FT2 data.  Optionally, mask out values that will not
            contribute to the exposure."""
-        if self.verbose >= 1: print(f'Loading FT2 files {ft2files}')
-        #if not hasattr(ft2files,'__iter__'): ft2files = [ft2files]
-        #handles = [fits.open(ft2,memmap=False) for ft2 in ft2files]
-        ### Cluge one file
-        handles = [fits.open(ft2files, memmap=False)]
-        
-        ft2lens = [handle['SC_DATA'].data.shape[0] for handle in handles]
+        if type(ft2files)==str: ft2files = [ft2files]
+        if self.verbose >= 1: 
+            print(f'Loading FT2 files {[os.path.split(file)[-1] for file in ft2files]}')
+
+
+        ### New code replaces following
+        # Create list of dictionaries with key, value the data name and data array 
         fields  = self.fields
-        arrays  = [np.empty(sum(ft2lens)) for i in range(len(fields))]
+        sc_data=[]
+        for filename in ft2files:
+            with fits.open(filename) as hdu:
+                gti_data = hdu['SC_DATA'].data
+                sc_data.append(dict( [(field, gti_data[field]) for field in fields]  ))
+        # add concatenated arrays to self
+        # Code later assumes angles in radians
+        for field in fields:
+            self.__dict__[field] = np.concatenate([scd[field] for scd in sc_data])
+            if ('RA_' in field) or ('DEC_' in field):
+                self.__dict__[field] *= DEG2RAD
+
+        #### following does not seem to work for multiple files
+        # handles = [fits.open(ft2,memmap=False) for ft2 in ft2files]
         
-        counter = 0
-        for ihandle,handle in enumerate(handles):
-            if self.verbose > 1:
-                print('...Loading FT2 file # %d'%(ihandle))
-            n = ft2lens[ihandle]
-            for ifield,field in enumerate(fields):
-                arrays[ifield][counter:counter+n] = handle['SC_DATA'].data.field(field)
-            handle.close()
+        # ft2lens = [handle['SC_DATA'].data.shape[0] for handle in handles]
+        # fields  = self.fields
+        # arrays  = [np.empty(sum(ft2lens)) for i in range(len(fields))]
+        
+        # counter = 0
+        # for ihandle,handle in enumerate(handles):
+        #     if self.verbose > 1:
+        #         print('...Loading FT2 file # %d'%(ihandle))
+        #     n = ft2lens[ihandle]
+        #     for ifield,field in enumerate(fields):
+        #         arrays[ifield][counter:counter+n] = handle['SC_DATA'].data.field(field)
+        #     handle.close()
+
+
+
         ## TEMP? maybe.  Handle case where FT2 file is not sorted
         #starts = arrays[self.fields.index('START')]
         #a = np.argsort(starts)
         #if not (np.all(starts==starts[a])):
             #arrays = [x[a].copy() for x in arrays]
         # end TEMP
-        for ifield,field in enumerate(fields):
-            self.__dict__[field] = arrays[ifield]
-            if ('RA_' in field) or ('DEC_' in field):
-                self.__dict__[field] *= DEG2RAD
+
+
+        # for ifield,field in enumerate(fields):
+        #     self.__dict__[field] = arrays[ifield]
+        #     if ('RA_' in field) or ('DEC_' in field):
+        #         self.__dict__[field] *= DEG2RAD
+ 
         # trim GTI to FT2 range
         ### ignore for now
         # if (self.gti_starts[0] < self.START[0]) or (self.gti_stops[-1] > self.STOP[-1]):
@@ -601,11 +634,11 @@ class EffectiveArea(object):
             self._read_phi(ct0_file,ct1_file)
 
     def _read_file(self,filename,tablename,columns):
-        hdu = fits.open(filename); table = hdu[tablename]
-        cbins = np.append(table.data.field('CTHETA_LO')[0],table.data.field('CTHETA_HI')[0][-1])
-        ebins = np.append(table.data.field('ENERG_LO')[0],table.data.field('ENERG_HI')[0][-1])
-        images = [np.asarray(table.data.field(c)[0],dtype=float).reshape(len(cbins)-1,len(ebins)-1) for c in columns]
-        hdu.close()
+        with fits.open(filename) as hdu:
+            table = hdu[tablename]
+            cbins = np.append(table.data.field('CTHETA_LO')[0],table.data.field('CTHETA_HI')[0][-1])
+            ebins = np.append(table.data.field('ENERG_LO')[0],table.data.field('ENERG_HI')[0][-1])
+            images = [np.asarray(table.data.field(c)[0],dtype=float).reshape(len(cbins)-1,len(ebins)-1) for c in columns]
         return ebins,cbins,images
 
     def _read_aeff(self,ct0_file,ct1_file):
@@ -839,10 +872,10 @@ def image(ea,event_class=-1,logea=False,fig_base=2,ctheta=0.99,show_image=False)
         if logea: pl.gca().set_yscale('log')
         pl.pcolor((ebins[:-1]*ebins[1:])**0.5,(cbins[:-1]+cbins[1:])/2.,effarea.reshape(len(cbins)-1,len(ebins)-1))
         pl.title('Effective Area')
-        pl.xlabel('$\mathrm{Energy\ (MeV)}$')
-        pl.ylabel('$\mathrm{cos( \theta)}$')
+        pl.xlabel(r'$\mathrm{Energy\ (MeV)}$')
+        pl.ylabel(r'$\mathrm{cos( \theta)}$')
         cb = pl.colorbar()
-        cb.set_label('$\mathrm{Effective\ Area\ (m^2)}$')
+        cb.set_label(r'$\mathrm{Effective\ Area\ (m^2)}$')
 
     #Generate a plot of the on-axis effective area with and without interpolation
     energies = np.logspace(np.log10(ebins[0]),np.log10(ebins[-1]),8*(len(ebins)-1)+1)
@@ -862,8 +895,8 @@ def image(ea,event_class=-1,logea=False,fig_base=2,ctheta=0.99,show_image=False)
     pl.plot(energies,f_vals,label='front nearest-neighbour interp.',color='blue')
     pl.plot(energies,b_vals,label='back nearest-neighbour interp.',color='red')
     pl.title('On-axis Effective Area')
-    pl.xlabel('$\mathrm{Energy\ (MeV)}$')
-    pl.ylabel('$\mathrm{Effective\ Area\ (cm^2)}$')
+    pl.xlabel(r'$\mathrm{Energy\ (MeV)}$')
+    pl.ylabel(r'$\mathrm{Effective\ Area\ (cm^2)}$')
     pl.legend(loc = 'lower right')
     pl.grid()
 

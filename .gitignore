@@ -1,2 +1,6 @@
 *.pyc
-
+*-checkpoint.*
+nohup.out
+.ipynb_checkpoints
+godot
+data
