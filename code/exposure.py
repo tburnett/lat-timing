@@ -446,13 +446,13 @@ class Livetime(object):
         mask,pcosines, acosines = self.get_cosines(skycoord)
         wts = base_spectrum(edom) 
         total_exposure = np.empty_like(edom) 
-        wts = base_spectrum(edom) 
+
         rvals = np.empty([len(edom),len(pcosines)]) 
         for i,(en,wt) in enumerate(zip(edom,wts)): 
             faeff,baeff = ea([en],pcosines) 
             rvals[i] = (faeff+baeff)*wt 
-            total_exposure[i] = rvals[i].sum()/wt 
-            aeff = simps(rvals,edom,axis=0)/simps(wts,edom)
+            total_exposure[i] = rvals[i].sum()/wt # not used?
+        aeff = simps(rvals,edom,axis=0)/simps(wts,edom)
 
         # Then an exposure:
         exposure = np.zeros(len(mask))
