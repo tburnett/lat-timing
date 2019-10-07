@@ -11,16 +11,17 @@ from astropy.coordinates import SkyCoord
 import keyword_options
 
 mission_start = Time('2001-01-01T00:00:00', scale='utc')
-day = 24*3600
+day = 24*3600.
 
 def MJD(met):
     "convert MET to MJD"
-    return (mission_start+TimeDelta(met, format='sec')).mjd
-def UT(met):
-    " convert MET value to ISO date string"
-    t=Time(MJD(met), format='mjd')
+    return (met/day + mission_start.mjd)
+def UT(mjd):
+    " convert MJD value to ISO date string"
+    t=Time(mjd, format='mjd')
     t.format='iso'; t.out_subfmt='date_hm'
     return t.value
+
 
 class Data(object):
     
@@ -50,7 +51,7 @@ class Data(object):
     
         data_files = sorted(glob.glob(os.path.expandvars(self.data_file_pattern)))
         assert len(data_files)>0, 'No files found using pattern {}'.format(self.data_file_pattern)
-        if self.verbose>1:
+        if self.verbose>2:
             gbtotal = np.array([os.stat(filename).st_size for filename in data_files]).sum()/2**30
             print(f'Found {len(data_files)} monthly photon data files, with {gbtotal:.1f} GB total')
 
@@ -67,7 +68,7 @@ class Data(object):
             year_range = ylim.clip(0, len(gti_files)) + np.array([0,1])
             month_range = (ylim*12+mlim-8).clip(0,len(data_files)) + np.array([0,1])
             if self.verbose>0:
-                print(f'Selected years {year_range}, months {month_range}')
+                print(f'From MJD range {mjd_range} select years {year_range}, months {month_range}')
         else:
             if self.verbose>0:
                 print('Loading all found data')
@@ -92,7 +93,7 @@ class Data(object):
                   f' deg of  ({self.l:.2f},{self.b:.2f})')
             ta,tb = df.iloc[0].time, df.iloc[-1].time
             print(f'\tDate range: {UT(ta):20} - {UT(tb)}'\
-                  f'\n\tMJD:        {MJD(ta):<20.1f} - {MJD(tb):<20.1f}')  
+                  f'\n\tMJD:        {ta:<20.1f} - {tb:<20.1f}')  
         return df 
 
     def _load_photon_data(self, filename, nside=1024):
@@ -123,8 +124,8 @@ class Data(object):
         ipix = healpy.query_disc(nside, cart(l,b), np.radians(radius), nest=False)
         incone = np.isin(df.hpindex, ipix)
 
-        # times: convert to double, add to start
-        t = np.array(df.time[incone],float)+tstart
+        # times: convert to double, add to start, convert to MJD
+        t = MJD(np.array(df.time[incone],float)+tstart)
 
         # convert position info to just distance from center             
         ll,bb = healpy.pix2ang(nside, df.hpindex[incone],  nest=False, lonlat=True)

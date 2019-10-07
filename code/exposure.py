@@ -111,7 +111,7 @@ class Livetime(object):
         """ Take the union of all GTIs provided by FT1 files, then take an 
             intersection with the (optional) gti_mask and the time limits.
         """
-        if self.verbose >= 1: print('Processing GTI...')
+        if self.verbose >= 1: print('Processing GTI ...', end=' ')
         if type(ft1files)==str: ft1files = [ft1files]
         # gti = self.gti = Gti(ft1files[0])
         # if len(ft1files) > 1:
@@ -146,7 +146,7 @@ class Livetime(object):
         self.gti_stops = np.concatenate(stops)
         self.LIVETIME = (self.gti_stops-self.gti_starts).sum()
         if self.verbose>0:
-            print( f'Processed {len(ft1files)} GTI files wtth {len(self.gti_starts)} intervals with'\
+            print( f' {len(ft1files)} files, {len(self.gti_starts)} intervals with'\
                    f' {int(self.LIVETIME):,} s live time')
 
     def _update_gti(self):
@@ -217,7 +217,10 @@ class Livetime(object):
            contribute to the exposure."""
         if type(ft2files)==str: ft2files = [ft2files]
         if self.verbose >= 1: 
-            print(f'Loading FT2 files {[os.path.split(file)[-1] for file in ft2files]}')
+            ff = [os.path.split(file)[-1] for file in ft2files]
+            if len(ff)>0:
+                print(f'Loading FT2 files {ff[0]},...,{ff[-1]}')
+            else: print(f'Loading FT2 file {ff[0]}')
 
 
         ### New code replaces following
@@ -234,23 +237,6 @@ class Livetime(object):
             self.__dict__[field] = np.concatenate([scd[field] for scd in sc_data])
             if ('RA_' in field) or ('DEC_' in field):
                 self.__dict__[field] *= DEG2RAD
-
-        #### following does not seem to work for multiple files
-        # handles = [fits.open(ft2,memmap=False) for ft2 in ft2files]
-        
-        # ft2lens = [handle['SC_DATA'].data.shape[0] for handle in handles]
-        # fields  = self.fields
-        # arrays  = [np.empty(sum(ft2lens)) for i in range(len(fields))]
-        
-        # counter = 0
-        # for ihandle,handle in enumerate(handles):
-        #     if self.verbose > 1:
-        #         print('...Loading FT2 file # %d'%(ihandle))
-        #     n = ft2lens[ihandle]
-        #     for ifield,field in enumerate(fields):
-        #         arrays[ifield][counter:counter+n] = handle['SC_DATA'].data.field(field)
-        #     handle.close()
-
 
 
         ## TEMP? maybe.  Handle case where FT2 file is not sorted
@@ -280,10 +266,10 @@ class Livetime(object):
 
         # ensure entries are sorted by time
         self.mask_entries(np.argsort(self.START)) 
-        if self.verbose > 1: print('Finished loading FT2 files!')
+        
   
     def _process_ft2(self):
-        if self.verbose >= 1: print('Processing the FT2 file (calculating overlap with GTI)...')
+        #if self.verbose >= 1: print('Processing the FT2 file (calculating overlap with GTI)...')
         # func = self._process_ft2_fast if self.fast_ft2 else \
         #        self._process_ft2_slow
         # overlaps = func(self.gti_starts,self.gti_stops)
@@ -301,7 +287,7 @@ class Livetime(object):
         self.LTFRAC = self.LIVETIME/(self.STOP-self.START)
         self.fields += ['LTFRAC']
         ### self.LIVETIME *= overlaps
-        if self.verbose > 1: print('Finished processing the FT2 file!')
+
 
     def _process_ft2_slow(self,gti_starts,gti_stops):
         """Calculate the fraction of each FT2 interval lying within the GTI.
@@ -463,8 +449,7 @@ class Livetime(object):
         tstop  = self.STOP[full_mask]
         mexposure = exposure[full_mask]
         #cexposure = np.cumsum(mexposure)
-        if self.verbose>0:
-            print(f'Exposure time range: {tstart[0]:.0f} to {tstop[-1]:.0f}')
+
         return pd.DataFrame(dict(tstart=tstart,tstop=tstop, exposure=mexposure))
 
 

@@ -1,30 +1,28 @@
 """
 Process time data set
 Expect to find set of files created by uw/data/timed_data/create_timed_data to generate files with times for all 
-Extract a single data set around a cone with TimedData
+Extract a single data set around a cone
 """
 
-import os, glob, pickle
-import healpy
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from astropy.time import Time, TimeDelta
 from astropy.coordinates import SkyCoord
 import keyword_options
 import exposure, data_management
 
 
-class TimedData(object):
-    """Create a data set at a given position
+class Main(object):
+    """Top-level processing for photon data
     """
  
     plt.rc('font', size=12)
     defaults=(
-        ('verbose',2,'verbosity level'),
-        ('radius', 5, 'cone radius for selection [deg]'),
+        ('verbose', 0,'verbosity level'),
+        ('radius',  5, 'cone radius for selection [deg]'),
         ('interval', 2, 'Binning time interval [days]'),
-        ('mjd_range', None, 'Range of MJD'),
+        ('mjd_range', None, 'Range of MJD: default all data'),
        )
     
     @keyword_options.decorate(defaults)
@@ -36,6 +34,15 @@ class TimedData(object):
 
         """
         keyword_options.process(self,kwargs)
+
+        self._set_geometry(name, position)
+
+        self.data = data_management.Data(self, mjd_range=self.mjd_range)
+        self.df = self.data.photon_df
+        
+        self.binned_exposure = self._get_exposure()
+
+    def _set_geometry(self, name, position):
         self.name=name
         if position is None:
             skycoord = SkyCoord.from_name(name)
@@ -43,44 +50,9 @@ class TimedData(object):
             self.l,self.b = (gal.l.value, gal.b.value)
         else:
             self.l,self.b = position
-        if self.verbose>1:
+        if self.verbose>0:
             print(f'Selected position: (l,b)=({self.l:.3f},{self.b:.3f}), radius={self.radius}')
-
-        self.data = data_management.Data(self, mjd_range=self.mjd_range)
-        self.df = self.data.photon_df
-        self.binned_exposure = self._get_exposure()
-
-    def plot_time(self, delta_max=2, delta_t=2, xlim=None):
-        """
-        """
-        df = self.df
-
-        t = data_management.MJD(df.time)
-        ta,tb=t[0],t[-1]
-        Nbins = int((tb-ta)/float(delta_t))
-
-        fig,ax= plt.subplots(figsize=(15,5))
-        hkw = dict(bins = np.linspace(ta,tb,Nbins), histtype='step')
-        ax.hist(t, label='E>100 MeV', **hkw)
-        ax.hist(t[(df.delta<delta_max) & (df.band>0)], label='delta<{} deg'.format(delta_max), **hkw);
-        ax.set(xlabel=r'$\mathrm{MJD}$', ylabel='counts per {:.0f} day'.format(delta_t))
-        if xlim is not None: ax.set(xlim=xlim)
-        ax.legend()
-        ax.set_title('{} counts vs. time'.format(self.name))
-
-    def plot_delta(self, cumulative=False, squared=True):
-        plt.rc('font', size=12)
-        df = self.df
-        fig,ax = plt.subplots(figsize=(6,3))
-        x = df.delta**2 if squared else df.delta
-        hkw = dict(bins=np.linspace(0, 25 if squared else 5, 100), 
-                   histtype='step',lw=2,cumulative=cumulative)
-        ax.hist(x, label='E>100 MeV', **hkw)
-        ax.hist(x[df.band>8], label='E>1 GeV', **hkw)
-        ax.set(yscale='log', xlabel='delta**2 [deg^2]' if squared else 'delta [deg]', 
-            ylabel='cumulative counts' if cumulative else 'counts'); 
-        ax.legend(loc='upper left' if cumulative else 'upper right');
-
+    
     def _get_exposure(self ):
         # get the livetime history wnd associated GTI
 
@@ -88,11 +60,11 @@ class TimedData(object):
         
         # use it and the current direction to get the expoosure
         edf = lt.get_exposure(SkyCoord(self.l,self.b,unit='deg',frame='galactic' )) # the exposure data frame
-        self.tstart=data_management.MJD(edf.tstart.values) #todo convert previously
+        self.tstart=data_management.MJD(edf.tstart.values) 
         self.tstop =data_management.MJD(edf.tstop.values)
         exp    = edf.exposure.values
-        if self.mjd_range is not None:
 
+        if self.mjd_range is not None:
             m = np.searchsorted(self.tstop, self.mjd_range[1])+1
             self.tstart = self.tstart[:m]
             self.tstop  = self.tstop[:m]
@@ -102,7 +74,9 @@ class TimedData(object):
         cumexp = np.concatenate(([0],np.cumsum(exp * (self.tstop-self.tstart))))
 
         time_range = self.tstop[-1]-self.tstart[0]
-        nbins = int(time_range/self.interval)+1; print(f'Selecting {nbins} intervals of {self.interval} days')
+        nbins = int(time_range/self.interval)+1; 
+        if self.verbose>0:
+            print(f'Binning: {nbins} intervals of {self.interval} days')
         self.time_bins = self.tstart[0] + np.arange(nbins+1)*self.interval 
 
         # get index into tstop array of the bin edges
@@ -115,7 +89,7 @@ class TimedData(object):
         TODO: allow cuts here
         """
         # find range comvered by current GTI and make subset DataFrame
-        etime = data_management.MJD(self.df.time) # TODO convert before
+        etime = self.df.time #  note, in MJD units
         imin,imax = np.searchsorted(etime, [self.tstart[0],self.tstop[-1]]);
         setime = etime[imin:imax]
         print(f'Select {len(setime):,} photons within live time range')
@@ -149,7 +123,36 @@ class TimedData(object):
         ax2.axhline(1, color='grey');ax2.grid(alpha=0.5)
         fig.suptitle(f'Flux check for {self.name}')
 
+    def plot_time(self, delta_max=2, delta_t=2, xlim=None):
+        """
+        """
+        df = self.df
 
+        t = data_management.MJD(df.time)
+        ta,tb=t[0],t[-1]
+        Nbins = int((tb-ta)/float(delta_t))
+
+        fig,ax= plt.subplots(figsize=(15,5))
+        hkw = dict(bins = np.linspace(ta,tb,Nbins), histtype='step')
+        ax.hist(t, label='E>100 MeV', **hkw)
+        ax.hist(t[(df.delta<delta_max) & (df.band>0)], label='delta<{} deg'.format(delta_max), **hkw);
+        ax.set(xlabel=r'$\mathrm{MJD}$', ylabel='counts per {:.0f} day'.format(delta_t))
+        if xlim is not None: ax.set(xlim=xlim)
+        ax.legend()
+        ax.set_title('{} counts vs. time'.format(self.name))
+
+    def plot_delta(self, cumulative=False, squared=True):
+        plt.rc('font', size=12)
+        df = self.df
+        fig,ax = plt.subplots(figsize=(6,3))
+        x = df.delta**2 if squared else df.delta
+        hkw = dict(bins=np.linspace(0, 25 if squared else 5, 100), 
+                   histtype='step',lw=2,cumulative=cumulative)
+        ax.hist(x, label='E>100 MeV', **hkw)
+        ax.hist(x[df.band>8], label='E>1 GeV', **hkw)
+        ax.set(yscale='log', xlabel='delta**2 [deg^2]' if squared else 'delta [deg]', 
+            ylabel='cumulative counts' if cumulative else 'counts'); 
+        ax.legend(loc='upper left' if cumulative else 'upper right');
 
 
 ### Code that must be run in FermiTools context to create the database
