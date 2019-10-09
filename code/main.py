@@ -10,7 +10,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
 import keyword_options
-import exposure, data_management
+import exposure 
+from data_management import Data, MJD
 
 
 class Main(object):
@@ -23,6 +24,7 @@ class Main(object):
         ('radius',  5, 'cone radius for selection [deg]'),
         ('interval', 2, 'Binning time interval [days]'),
         ('mjd_range', None, 'Range of MJD: default all data'),
+
        )
     
     @keyword_options.decorate(defaults)
@@ -36,10 +38,8 @@ class Main(object):
         keyword_options.process(self,kwargs)
 
         self._set_geometry(name, position)
-
-        self.data = data_management.Data(self, mjd_range=self.mjd_range)
-        self.df = self.data.photon_df
-        
+        self.data = Data(self)
+        self.df = self.data.photon_data
         self.binned_exposure = self._get_exposure()
 
     def _set_geometry(self, name, position):
@@ -56,22 +56,11 @@ class Main(object):
     def _get_exposure(self ):
         # get the livetime history wnd associated GTI
 
-        lt = exposure.Livetime(self.data.ft2_files, self.data.gti_files, verbose=self.verbose)
-        
-        # use it and the current direction to get the expoosure
-        edf = lt.get_exposure(SkyCoord(self.l,self.b,unit='deg',frame='galactic' )) # the exposure data frame
-        self.tstart=data_management.MJD(edf.tstart.values) 
-        self.tstop =data_management.MJD(edf.tstop.values)
-        exp    = edf.exposure.values
-
-        if self.mjd_range is not None:
-            m = np.searchsorted(self.tstop, self.mjd_range[1])+1
-            self.tstart = self.tstart[:m]
-            self.tstop  = self.tstop[:m]
-            exp = exp[:m]
-        
-        #use cumulative exposure over 30-sec bins to integrate over larger periods
-        cumexp = np.concatenate(([0],np.cumsum(exp * (self.tstop-self.tstart))))
+        exp = self.data.exposure.exposure.values
+        self.tstart= self.data.exposure.start.values
+        self.tstop = self.data.exposure.stop.values
+        #use cumulative exposure to integrate over larger periods
+        cumexp = np.concatenate(([0],np.cumsum(exp)) )
 
         time_range = self.tstop[-1]-self.tstart[0]
         nbins = int(time_range/self.interval)+1; 
@@ -88,22 +77,9 @@ class Main(object):
         """ use time intervals defined by exposure calculation to generate equivalent bins
         TODO: allow cuts here
         """
-        # find range comvered by current GTI and make subset DataFrame
-        etime = self.df.time #  note, in MJD units
-        imin,imax = np.searchsorted(etime, [self.tstart[0],self.tstop[-1]]);
-        setime = etime[imin:imax]
-        print(f'Select {len(setime):,} photons within live time range')
-
-        # get associated live time index for each photon
-        lt_index = np.searchsorted(self.tstop, setime) # before which stop
-        # make sure past start
-        tdiff = setime - self.tstart[lt_index]
-        in_gti = tdiff>=0
-        print(f'... and exclude {sum(~in_gti):,} photons not in GTI')
-        etime_ok = setime[in_gti] 
-
+        time = self.df.time.values #  note, in MJD units
         # bin the data (all photons so far)
-        return np.histogram(etime_ok, self.time_bins)[0]
+        return np.histogram(time, self.time_bins)[0]
 
     def plot_normalized_rate(self, cut=None):
 
