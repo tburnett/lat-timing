@@ -205,7 +205,7 @@ class Data(object):
             rvals[i] = (faeff+baeff)*wt
 
         aeff = simps(rvals,edom,axis=0)/simps(wts,edom)
-        return (aeff*livetime).astype(np.float32)
+        return (aeff*livetime)
 
     def _process_ft2(self, ft2_files, gti):
         """Process set of FT2 files, with S/C history data
@@ -226,15 +226,15 @@ class Data(object):
             with fits.open(filename) as hdu:
                 scdata = hdu['SC_DATA'].data
                 # get times to check against MJD limits and GTI
-                start, stop = [MJD(np.array(scdata.START, np.float32)), 
-                               MJD(np.array(scdata.STOP, np.float32))]
+                start, stop = [MJD(np.array(scdata.START, float)), 
+                               MJD(np.array(scdata.STOP, float))]
                 if self.mjd_range is not None:
                     a,b=  self.mjd_range
                     if start[0]>b or stop[-1]<a:
                         print(f'Reject file {filename}: not in range' )
                         continue
-                # apply GTI
-                in_gti = gti(start) 
+                # apply GTI--want the interval fully inside
+                in_gti = np.logical_and(gti(start) , gti(stop))
                 if self.verbose>2:
                     print(f'\tfile {filename}: {len(start)} entries, {sum(in_gti)} in GTI')
                 t = [('start', start[in_gti]), ('stop',stop[in_gti])]+\
@@ -254,7 +254,6 @@ class Data(object):
 
         pcosines = cosines(df.ra_scz,    df.dec_scz)
         zcosines = cosines(df.ra_zenith, df.dec_zenith)
-
 
         # mask out entries too close to zenith, or too far away from ROI center
         mask =   (pcosines >= self.cos_theta_max) & (zcosines>=np.cos(np.radians(self.z_max)))
