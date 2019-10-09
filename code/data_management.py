@@ -43,7 +43,6 @@ class Data(object):
         'For estimate of exposure',
         ('base_spectrum', 'lambda E: (E/1000)**-2.1', 'Spectrum to use'),
         ('energy_domain', np.logspace(2,5,13), 'energy bins for exposure'),
-        ('test', True, 'test mode'),
         ('ignore_gti', False, ''),
     )
 
@@ -57,15 +56,14 @@ class Data(object):
         # generate lists of files to process
         data_files, gti_files, ft2_files = self._check_files(self.mjd_range)
 
-        if self.test:
-            self.gti = self._process_gti(gti_files)
-            # convert each to a DataFrame
-            self.exposure =  self._process_ft2(ft2_files,self.gti)
-            self.photon_data = self._process_data(data_files, self.gti)
+        self.gti = self._process_gti(gti_files)
+        # convert each to a DataFrame
+        self.exposure =  self._process_ft2(ft2_files,self.gti)
+        photon_data = self._process_data(data_files, self.gti)
 
-        # temporary for comparing with old code
-        self.ft2_files = ft2_files
-        self.gti_files = gti_files
+        # final edit of photon data to remove any not in the exposure range 
+        self.photon_data =self._check_photons(self.exposure, photon_data)
+
 
             
     def _check_files(self, mjd_range):
@@ -90,10 +88,10 @@ class Data(object):
             ylim,mlim = np.array([t.year for t in tlim])-2008, np.array([t.month for t in tlim])-1
             year_range = ylim.clip(0, len(gti_files)) + np.array([0,1])
             month_range = (ylim*12+mlim-8).clip(0,len(data_files)) + np.array([0,2]) #add 2 months?
-            if self.verbose>0:
+            if self.verbose>1:
                 print(f'From MJD range {mjd_range} select years {year_range}, months {month_range}')
         else:
-            if self.verbose>0:
+            if self.verbose>1:
                 print('Loading all found data')
 
         return (data_files if mjd_range is None else data_files[slice(*month_range)], 
@@ -124,6 +122,8 @@ class Data(object):
             ta,tb = df.iloc[0].time, df.iloc[-1].time
             print(f'\tDates: {UT(ta):16} - {UT(tb)}'\
                 f'\n\tMJD  : {ta:<16.1f} - {tb:<16.1f}')  
+
+
         return df 
 
     def _load_photon_data(self, filename, gti, nside=1024):
@@ -146,7 +146,7 @@ class Data(object):
         with open(filename,'rb') as f:
             d = pickle.load( f ,encoding='latin1')
             tstart = d['tstart']
-            if MJD(tstart) > self.mjd_range[1]:
+            if self.mjd_range is not None and MJD(tstart) > self.mjd_range[1]:
                 return None
             df = pd.DataFrame(d['timerec'])
         # cartesian vector from l,b for healpy stuff    
@@ -173,6 +173,26 @@ class Data(object):
 
         return out_df
     
+    def _check_photons(self, exposure, photon_data):
+        # find range covered by exposure
+        etime = photon_data.time.values #  note, in MJD units
+        start, stop = exposure.start.values, exposure.stop.values
+        imin,imax = np.searchsorted(etime, [start[0], stop[-1]])
+        setime = etime[imin:imax]
+        df = photon_data.iloc[imin:imax]
+        if self.verbose>1:
+            print(f'Check to see if photons have valid exposure: find {len(setime):,} photons within live time range')
+
+        # get associated live time index for each photon
+        lt_index = np.searchsorted(stop, setime) # before which stop
+        # make sure past corresponding start
+        tdiff = setime - start[lt_index]
+        in_bin = tdiff>=0
+        if self.verbose>1:
+            print(f'\texclude {sum(~in_bin):,} not in an exposure bin--{sum(in_bin):,} remain.')
+        etime_ok = setime[in_bin]
+        return df.loc[in_bin,:] 
+
     def write(self, filename):
         """ write to a file
         """
@@ -233,8 +253,8 @@ class Data(object):
                     if start[0]>b or stop[-1]<a:
                         print(f'Reject file {filename}: not in range' )
                         continue
-                # apply GTI--want the interval fully inside
-                in_gti = np.logical_and(gti(start) , gti(stop))
+                # apply GTI to bin center (avoid edge effects?)
+                in_gti = gti(0.5*(start+stop))
                 if self.verbose>2:
                     print(f'\tfile {filename}: {len(start)} entries, {sum(in_gti)} in GTI')
                 t = [('start', start[in_gti]), ('stop',stop[in_gti])]+\
@@ -300,14 +320,14 @@ class Data(object):
             print( f' {len(gti_files)} files, {len(start)} intervals with'\
                    f' {int(livetime):,} days live time')
 
+        sel = slice(None)
         if self.mjd_range is not None:
             a, b = self._get_limits(start)
             if a>0 or b<len(start):
                 if self.verbose>1:
                     print(f'\tcut from {len(start):,} to {a} - {b}, or {b-a:,} entries after MJD range selection')
-
                 sel = slice(a,b)
-            else: sel=slice(None)
+
 
         class GTI(object):
             """ functor class that tests for being in the GTI range
