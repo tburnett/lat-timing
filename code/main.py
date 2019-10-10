@@ -20,7 +20,7 @@ class Main(object):
  
     plt.rc('font', size=12)
     defaults=(
-        ('verbose', 0,'verbosity level'),
+        ('verbose', 1, 'verbosity level'),
         ('radius',  5, 'cone radius for selection [deg]'),
         ('interval', 2, 'Binning time interval [days]'),
         ('mjd_range', None, 'Range of MJD: default all data'),
@@ -40,7 +40,8 @@ class Main(object):
         self._set_geometry(name, position)
         self.data = Data(self)
         self.df = self.data.photon_data
-        self.binned_exposure = self._get_exposure()
+
+
 
     def _set_geometry(self, name, position):
         self.name=name
@@ -53,65 +54,52 @@ class Main(object):
         if self.verbose>0:
             print(f'Selected position: (l,b)=({self.l:.3f},{self.b:.3f}), radius={self.radius}')
     
-    def _get_exposure(self ):
-        # get the livetime history wnd associated GTI
 
-        exp = self.data.exposure.exposure.values
-        self.tstart= self.data.exposure.start.values
-        self.tstop = self.data.exposure.stop.values
-        #use cumulative exposure to integrate over larger periods
-        cumexp = np.concatenate(([0],np.cumsum(exp)) )
+    def plot_normalized_rate(self, step=None, min_exposure_factor=0.3, data_cut=None):
 
-        time_range = self.tstop[-1]-self.tstart[0]
-        nbins = int(time_range/self.interval)+1; 
+        # get binned data, cut out low exposure bins
+        dfm = self.data.binner(step=step,cut=data_cut)
+        exp =    dfm.exp.values
+        exp_mean = exp.mean()
+        mask = exp > min_exposure_factor*exp_mean
+        interval = step or self.interval
         if self.verbose>0:
-            print(f'Binning: {nbins} intervals of {self.interval} days')
-        self.time_bins = self.tstart[0] + np.arange(nbins+1)*self.interval 
-
-        # get index into tstop array of the bin edges
-        edge_index = np.searchsorted(self.tstop, self.time_bins)
-        # now the exposure integrated over the intervals
-        return  np.diff(cumexp[edge_index])
-        
-    def _data_binner(self, cut=None):
-        """ use time intervals defined by exposure calculation to generate equivalent bins
-        TODO: allow cuts here
-        """
-        time = self.df.time.values #  note, in MJD units
-        # bin the data (all photons so far)
-        return np.histogram(time, self.time_bins)[0]
-
-    def plot_normalized_rate(self, cut=None):
-
-        binned_data = self._data_binner(cut)
-
-        bin_center = (self.time_bins[1:]+self.time_bins[:-1])/2
-        mask = binned_data>10 
-        ratio = binned_data[mask]/self.binned_exposure[mask]
+            print(f'exposure minimum factor, {min_exposure_factor}, removes {sum(~mask)}/{len(mask)} intervals')
+            
+        dfm = dfm.loc[mask,:]
+        rel_exp = dfm.exp.values/exp_mean
+        t=       dfm.time.values
+        counts = dfm.counts.values
+        ratio = counts/rel_exp
         y = ratio/ratio.mean()
+
+
         fig, (ax1,ax2)= plt.subplots(2,1, figsize=(15,5), sharex=True,gridspec_kw=dict(hspace=0) )
-        t = bin_center
-        ax1.plot(t, self.binned_exposure, '+'); ax1.grid(alpha=0.5)
-        ax1.set(ylabel=f'Exposure per {self.interval} day')
-        dy = y/np.sqrt(binned_data[mask]) 
-        ax2.errorbar(x =  t[mask],   y=y, yerr=dy,  fmt='+');
-        ax2.set(xlabel='MJD', ylabel='Relative flux')
-        ax2.axhline(1, color='grey');ax2.grid(alpha=0.5)
-        fig.suptitle(f'Flux check for {self.name}')
+        ax1.plot(t, rel_exp, '+'); ax1.grid(alpha=0.5)
+        ax1.set(ylabel=f'Exposure per {interval} day', ylim=(0,None))
+        ax1.text(0.01, 0.05, f'mean exposure: {exp_mean/interval:.2e} / day',
+                     transform=ax1.transAxes)
+        dy = y/np.sqrt(counts) 
+        ax2.errorbar(t, y, yerr=dy,  fmt='+');
+        ax2.set(xlabel=r'$\mathrm{MJD}$', ylabel='Relative flux')
+        ax2.axhline(1, color='grey')
+        ax2.grid(alpha=0.5)
+        fig.suptitle(f'Normalized flux for {self.name}')
+    
 
     def plot_time(self, delta_max=2, delta_t=2, xlim=None):
         """
         """
         df = self.df
 
-        t = data_management.MJD(df.time)
+        t = df.time.values
         ta,tb=t[0],t[-1]
         Nbins = int((tb-ta)/float(delta_t))
 
         fig,ax= plt.subplots(figsize=(15,5))
         hkw = dict(bins = np.linspace(ta,tb,Nbins), histtype='step')
         ax.hist(t, label='E>100 MeV', **hkw)
-        ax.hist(t[(df.delta<delta_max) & (df.band>0)], label='delta<{} deg'.format(delta_max), **hkw);
+        ax.hist(t[(df.delta<delta_max) & (df.band>0)], label='delta<{} deg'.format(delta_max), **hkw)
         ax.set(xlabel=r'$\mathrm{MJD}$', ylabel='counts per {:.0f} day'.format(delta_t))
         if xlim is not None: ax.set(xlim=xlim)
         ax.legend()

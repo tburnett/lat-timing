@@ -13,13 +13,13 @@ from astropy.coordinates import SkyCoord
 from exposure import EffectiveArea
 import keyword_options
 
-mission_start = Time('2001-01-01T00:00:00', scale='utc')
+mission_start = Time('2001-01-01T00:00:00', scale='utc').mjd
 day = 24*3600.
 
 def MJD(met):
     "convert MET to MJD"
-    return (met/day + mission_start.mjd)
-def UT(mjd):
+    return (mission_start + met/day  )
+def UTC(mjd):
     " convert MJD value to ISO date string"
     t=Time(mjd, format='mjd')
     t.format='iso'; t.out_subfmt='date_hm'
@@ -37,12 +37,14 @@ class Data(object):
         ('data_file_pattern','$FERMI/data/P8_P305/time_info/month_*.pkl', 'monthly photon data files'),
         ('ft2_file_pattern', '/nfs/farm/g/glast/g/catalog/P8_P305/ft2_20*.fits', 'yearly S/C history files'),
         ('gti_file_pattern', '$FERMI/data/P8_P305/yearly/*.fits', 'glob pattern for yearly Files with GTI info'),
+        'S/C limits',
         ('cos_theta_max', 0.4, 'cosine of maximum S/C theta'),
         ('z_max', 100, 'maximum angle between zenith and S/C bore'),
         ('mjd_range', None, 'default MJD limits'),
+        ('interval', 10, 'default binning step'),
         'For estimate of exposure',
         ('base_spectrum', 'lambda E: (E/1000)**-2.1', 'Spectrum to use'),
-        ('energy_domain', np.logspace(2,5,13), 'energy bins for exposure'),
+        ('energy_domain', 'np.logspace(2,5,13)', 'energy bins for exposure calculation'),
         ('ignore_gti', False, ''),
     )
 
@@ -65,6 +67,55 @@ class Data(object):
         self.photon_data =self._check_photons(self.exposure, photon_data)
 
 
+    def binner(self, step=None, start=None, stop=None, cut=None):
+        """Bin the photon data and exposure 
+
+        parameters:
+            step : bin size, default self.interval
+            start, stop: optional: default to ends
+            cut : a query string to use to filter the photon data DataFrame
+
+        return: a DataFrame with fields
+            time  : bin center times in MJD
+            exp   : exposure integrated over the bin
+            counts: photon counts, all data (for now)
+        """
+        # TODO: allow for multiple cut strings, make counts an array of corresponding counts
+        
+        # get stuff from photon data, exposure calculation
+        exp   = self.exposure.exposure.values
+        estart= self.exposure.start.values
+        estop = self.exposure.stop.values
+
+        if cut is not None:
+            ptime = self.photon_data.query(cut).time.values #  pkhton times, note, in MJD units
+            if self.verbose>0:
+                print(f'Binner selected {len(ptime)}/{len(self.photon_data)} photons with query "{cut}"')
+        else:
+            ptime = self.photon_data.time.values
+        
+        #set up bins from args or use defaults
+        step = step or self.interval
+        start = start or estart[0]
+        stop =  stop  or estop[-1]
+        nbins = int((stop-start)/step)
+        time_bins = np.linspace(start, stop, nbins)
+        
+        if self.verbose>0:
+            print(f'Binning: {nbins} intervals of {step or self.interval} days fronm {time_bins[0]:.1f} to {time_bins[-1]:.1f}')
+        
+        #use cumulative exposure to integrate over larger periods
+        cumexp = np.concatenate(([0],np.cumsum(exp)) )
+
+        # get index into tstop array of the bin edges
+        edge_index = np.searchsorted(estop, time_bins)
+        # now the exposure integrated over the intervals
+        binned_exposure = np.diff(cumexp[edge_index])
+
+        # bin the data (all photons so far)
+        binned_time = np.histogram(ptime, time_bins)[0]
+        
+        return pd.DataFrame(dict(time= (time_bins[1:]+time_bins[:-1])/2, exp=binned_exposure, counts=binned_time))
             
     def _check_files(self, mjd_range):
         """ return lists of files to process
@@ -83,7 +134,7 @@ class Data(object):
 
 
         if mjd_range is not None:
-            mjd_range = np.array(mjd_range).clip(mission_start.mjd, None)
+            mjd_range = np.array(mjd_range).clip(mission_start, None)
             tlim =Time(mjd_range, format='mjd').datetime
             ylim,mlim = np.array([t.year for t in tlim])-2008, np.array([t.month for t in tlim])-1
             year_range = ylim.clip(0, len(gti_files)) + np.array([0,1])
@@ -93,6 +144,8 @@ class Data(object):
         else:
             if self.verbose>1:
                 print('Loading all found data')
+
+        self.mjd_range = mjd_range # save for reference
 
         return (data_files if mjd_range is None else data_files[slice(*month_range)], 
                 gti_files  if mjd_range is None else gti_files[slice(*year_range)], 
@@ -120,7 +173,7 @@ class Data(object):
             print(f'\n\tSelected {len(df)} photons within {self.radius}'\
                   f' deg of  ({self.l:.2f},{self.b:.2f})')
             ta,tb = df.iloc[0].time, df.iloc[-1].time
-            print(f'\tDates: {UT(ta):16} - {UT(tb)}'\
+            print(f'\tDates: {UTC(ta):16} - {UTC(tb)}'\
                 f'\n\tMJD  : {ta:<16.1f} - {tb:<16.1f}')  
 
 
@@ -212,7 +265,7 @@ class Data(object):
         # get a set of energies and associated weights from a trial spectrum
         base_spectrum = eval(self.base_spectrum) #lambda E: (E/1000)**-2.1 
         assert base_spectrum(1000)==1.
-        edom = self.energy_domain
+        edom = eval(self.energy_domain)
         wts = base_spectrum(edom) 
 
         # effectivee area function from 
