@@ -1,4 +1,4 @@
-# Develop and apply code using timing of Fermi-LAT sources
+# Develop and apply code for timing of Fermi-LAT sources
 
 Code is in python 3, making it necessarily independent of the Fermi ScienceTools for now.
 
