@@ -1,4 +1,5 @@
 """Manage photon data, S/C history, GTI, effective area
+Also add weights
 """
 
 import os, glob, pickle
@@ -126,10 +127,11 @@ class Data(object):
         assert os.path.exists(filename),f'File {filename} not found.'
         wtd = pickle.load(open(filename, 'rb'), encoding='latin1')
         assert type(wtd)==dict, 'Expect a dictionary'
-        #assert np.array('pixels nside weights'.split()) in wtd.keys()
+        test_elements = 'energy_bins pixels weights nside model_name radius order roi_name'.split()
+        assert np.all([x in wtd.keys() for x in test_elements]),f'Dict missing one of the keys {test_elements}'
 
         if self.verbose>0:
-            print(f'Adding weights from file {filename}')
+            print(f'Adding weights from file {os.path.realpath(filename)}')
         # extract pixel ids and nside used
         wt_pix   = wtd['pixels']
         nside_wt = wtd['nside']
@@ -160,7 +162,8 @@ class Data(object):
         # final grand lookup -- isn't numpy wonderful!
         photons.loc[:,'weight'] = wts[tuple([band_index, weight_index])] 
         if self.verbose>0:
-            print(f'\t{sum(np.isnan(photons.weight.values))} weights set to NaN')   
+            print(f'\t{sum(np.isnan(photons.weight.values))} weights set to NaN')
+        return wtd # for reference   
 
 
     def _check_files(self, mjd_range):
@@ -238,7 +241,7 @@ class Data(object):
             DataFrame with columns:
                 band : from input, energy and event type  
                 time : Mission Elapsed Time in MJD (double)
-                delta : distance from input position (deg, float32)
+                radius : radial distance from input position (deg, float32)
         """       
         l,b,radius = self.l, self.b, self.radius      
         with open(filename,'rb') as f:
@@ -262,14 +265,14 @@ class Data(object):
         if np.sum(in_gti)==0:
             return None
 
-        # convert position info to just distance from center 
+        # generate  radial distance from center from position 
         hpindex =  df.hpindex[incone][in_gti]           
         ll,bb = healpy.pix2ang(self.nside, hpindex,  nest=False, lonlat=True)
         t2 = np.array(np.sqrt((1.-np.dot(center, cart(ll,bb)))*2), np.float32) 
 
         out_df = pd.DataFrame(np.rec.fromarrays(
             [df.band[incone][in_gti], t[in_gti], hpindex, np.degrees(t2)], 
-            names='band time pixel delta'.split()))
+            names='band time pixel radius'.split()))
 
         return out_df
     
