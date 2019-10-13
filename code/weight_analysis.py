@@ -20,7 +20,7 @@ class Main(object):
     )
     
     @keyword_options.decorate(defaults)
-    def __init__(self, **kwargs):
+    def __init__(self,  **kwargs):
         keyword_options.process(self, kwargs)
 
         sc = SkyCoord.from_name(self.source_name).galactic
@@ -43,7 +43,7 @@ class Main(object):
         ok = np.logical_not(pd.isna(gd.weight))
         self.photons = gd.loc[ok,:]
 
-    def corner_plot(self):
+    def corner_plot(self, weighted=False, **kwargs):
         """produce a "corner" plot.
         """
         fig, axx=plt.subplots(3,3, figsize=(10,10))
@@ -52,10 +52,15 @@ class Main(object):
                     bins=(16,20,20),
                     label_kwargs=dict(fontsize=14), 
                     labels=['Energy band index', 'Radius [deg]', 'weight'],
-                    show_titles=False, top_ticks=True, color='blue', fig=fig);
-        fig.set_edgecolor('white')
-
-        fig.suptitle(f'Weight analysis, {len(self.photons)} events\nModel info'+self.model_info,
+                    weights=self.photons.weight if weighted else None,
+                    show_titles=False, top_ticks=True, color='blue', fig=fig, 
+                    hist_kwargs=dict(histtype='stepfilled', facecolor='lightgrey',edgecolor='blue', lw=2),
+                      **kwargs);
+        fig.set_facecolor('white')
+        use_weights='weighted' if weighted else 'not weighted'
+        fig.suptitle(f'{self.source_name} analysis\n  {len(self.photons)} events\n  {use_weights} \nModel info'+self.model_info,
                     fontsize=14, ha='left',
-                    #fontproperties=dict(family='monospace'), #didn't work
+                    fontdict=dict(family='monospace'), #didn't work
                     )
+
+        
