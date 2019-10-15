@@ -16,13 +16,22 @@ here=`pwd -P`
 export PYTHONPATH=$here/code:$PYTHONPATH
 
 # starting a jupyter lab server - note the port
-# to connect from a remote computer, run ssh -N -f -L localhost:$localport:localhost:$remoteport $userid@rhel6-64x.slac.stanford.edu
 # I use remoteport=8890 instead of the default 8888 since other users may have servers running
-# I set my localport to correspond to the server machine, to keep track of multiple servers
 
 remoteport=8890
-echo Starting jupyterlab with port $remoteport
+if [ "$#" -gt  0 ]; then
+    echo ${1}
+    remoteport=${1}
+fi
+host=`hostname`
+echo Starting jupyterlab with port $remoteport on $host
 rm -f nohup.out
 nohup jupyter lab --notebook-dir=$here --port=$remoteport --no-browser
 
 
+# to connect from a remote computer, run ssh -N -f -L localhost:$localport:localhost:$remoteport $userid@rhel6-64x.slac.stanford.edu
+# I set my localport to correspond to the server machine, to keep track of multiple servers
+
+echo "To connect from a remote computer, run:"
+user=`whoami`
+echo "ssh -N -f -L localhost:${remoteport}:${host}.slac.stanford.edu:${remoteport} ${user}@${host}.slac.stanford.edu"
