@@ -14,6 +14,7 @@ import corner
 
 #local
 from data_management import Data
+import cell
 import keyword_options
 
 
@@ -22,8 +23,9 @@ class BinnedWeights(object):
     
     def __init__(self, data):
         # get predefined bin data and corresponding fractional exposure 
-        time_bins, exposure = data.binner()
-        self.bin_centers = 0.5*(time_bins[1:]+time_bins[:-1])
+        bins, exposure = data.binner()
+        self.bins=bins
+        self.bin_centers = 0.5*(self.bins[1:]+self.bins[:-1])
         self.fexposure = exposure/np.sum(exposure)
         self.source_name = data.source_name
 
@@ -34,13 +36,28 @@ class BinnedWeights(object):
 
         # use photon times to get indices of bin edges
         self.weights = self.photons.weight
-        self.edges = np.searchsorted(self.photons.time, time_bins)
+        self.edges = np.searchsorted(self.photons.time, self.bins)
         
+    def __repr__(self):
+        return f'{self.__class__.__name__}:  {len(self.fexposure)} cells from {self.bins[0]:.1f} to {self.bins[-1]:.1f} for source {self.source_name}'
+
     def __getitem__(self, i):
+        # get info for ith time bin
         k = self.edges        
         wts = self.weights[k[i]:] if i>len(k)-3 else self.weights[k[i]:k[i+2]] 
-        return self.bin_centers[i], self.fexposure[i], wts.values
-    
+        tstart,tstop = self.bins[i:i+2]
+
+        # create a Cell, as ported from godot. leave off photon times, ignore S2B for now.
+        return cell.Cell(
+            tstart=self.bins[i], 
+            tstop=self.bins[i+1],
+            exposure =  self.fexposure[i], 
+            photon_times = [],
+            photon_weights = wts, 
+            source_to_background_ratio=0.5, ## TODO: needs in;y 
+            )
+        
+
     def __len__(self):
         return len(self.bin_centers)
 
