@@ -22,6 +22,7 @@ class Main(object):
         ('verbose', 1,),
         ('source_name', 'Geminga','name of the source'),
         ('mjd_range', (51910, 54800),'MJD limits to use'),
+        ('interval', 5, 'days per time bin'),
         ('weight_file', '../data/geminga_weights.pkl', 'location of pointlike weight file'),
     )
     

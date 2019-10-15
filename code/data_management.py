@@ -32,6 +32,7 @@ class Data(object):
     """
     
     defaults=(
+        ('source_name', 'unnamed', 'name for source'),
         ('radius', 5, 'cone radius for selection [deg]'),
         ('verbose',2,'verbosity level'),
         'File locations, as glob patterns',
@@ -69,33 +70,22 @@ class Data(object):
         self.photon_data =self._check_photons(self.exposure, photon_data)
 
 
-    def binner(self, step=None, start=None, stop=None, cut=None):
-        """Bin the photon data and exposure 
+    def binner(self, step=None, start=None, stop=None,):
+        """Basic binner returns binned exposure and bin definition for histograms 
 
         parameters:
             step : bin size, default self.interval
             start, stop: optional: default to ends
-            cut : a query string to use to filter the photon data DataFrame
 
-        return: a DataFrame with fields
-            time  : bin center times in MJD
-            exp   : exposure integrated over the bin
-            counts: photon counts, all data (for now)
+        return: a tuple
+            time_bins , binned_exposure
         """
-        # TODO: allow for multiple cut strings, make counts an array of corresponding counts
         
         # get stuff from photon data, exposure calculation
         exp   = self.exposure.exposure.values
         estart= self.exposure.start.values
         estop = self.exposure.stop.values
 
-        if cut is not None:
-            ptime = self.photon_data.query(cut).time.values #  pkhton times, note, in MJD units
-            if self.verbose>0:
-                print(f'Binner selected {len(ptime)}/{len(self.photon_data)} photons with query "{cut}"')
-        else:
-            ptime = self.photon_data.time.values
-        
         #set up bins from args or use defaults
         step = step or self.interval
         start = start or estart[0]
@@ -114,7 +104,31 @@ class Data(object):
         # now the exposure integrated over the intervals
         binned_exposure = np.diff(cumexp[edge_index])
 
-        # bin the data (all photons so far)
+        return time_bins, binned_exposure
+
+    def count_binner(self, step=None, start=None, stop=None, cut=None):
+        """ Bin the number of counts
+
+        parameters:
+            step : bin size, default self.interval
+            start, stop: optional: default to ends
+            cut : (not implemented)
+
+        return: a DataFrame with fields
+            time  : bin center times in MJD
+            exp   : exposure integrated over the bin
+            counts: photon counts, all data (for now)
+        """
+        # TODO: allow for multiple cut strings, make counts an array of corresponding counts
+
+        time_bins, binned_exposure = self.binner(step, start, stop)
+        if cut is not None:
+            ptime = self.photon_data.query(cut).time.values #  pkhton times, note, in MJD units
+            if self.verbose>0:
+                print(f'Binner selected {len(ptime)}/{len(self.photon_data)} photons with query "{cut}"')
+        else:
+            ptime = self.photon_data.time.values
+        # use np.histogram to bin the photons
         binned_time = np.histogram(ptime, time_bins)[0]
         
         return pd.DataFrame(dict(time= (time_bins[1:]+time_bins[:-1])/2, exp=binned_exposure, counts=binned_time))
@@ -164,7 +178,6 @@ class Data(object):
         if self.verbose>0:
             print(f'\t{sum(np.isnan(photons.weight.values))} weights set to NaN')
         return wtd # for reference   
-
 
     def _check_files(self, mjd_range):
         """ return lists of files to process
