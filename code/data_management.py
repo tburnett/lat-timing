@@ -94,7 +94,7 @@ class Data(object):
         time_bins = np.linspace(start, stop, nbins)
         
         if self.verbose>0:
-            print(f'Binning: {nbins} intervals of {step or self.interval} days fronm {time_bins[0]:.1f} to {time_bins[-1]:.1f}')
+            print(f'Binning: {nbins-1} intervals of {step or self.interval} days fronm {time_bins[0]:.1f} to {time_bins[-1]:.1f}')
         
         #use cumulative exposure to integrate over larger periods
         cumexp = np.concatenate(([0],np.cumsum(exp)) )

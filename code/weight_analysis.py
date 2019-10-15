@@ -16,6 +16,47 @@ import corner
 from data_management import Data
 import keyword_options
 
+
+class BinnedWeights(object):
+    """ manage access to weights"""
+    
+    def __init__(self, data):
+        # get predefined bin data and corresponding fractional exposure 
+        time_bins, exposure = data.binner()
+        self.bin_centers = 0.5*(time_bins[1:]+time_bins[:-1])
+        self.fexposure = exposure/np.sum(exposure)
+        self.source_name = data.source_name
+
+        # get the photon data with good weights
+        w = data.photon_data.weight
+        good = np.logical_not(np.isnan(w))
+        self.photons = data.photon_data.loc[good]
+
+        # use photon times to get indices of bin edges
+        self.weights = self.photons.weight
+        self.edges = np.searchsorted(self.photons.time, time_bins)
+        
+    def __getitem__(self, i):
+        k = self.edges        
+        wts = self.weights[k[i]:] if i>len(k)-3 else self.weights[k[i]:k[i+2]] 
+        return self.bin_centers[i], self.fexposure[i], wts.values
+    
+    def __len__(self):
+        return len(self.bin_centers)
+
+    def test_plots(self):
+        """ some test plots of properties of the weight distribution"""
+        fig, (ax1,ax2,ax3) = plt.subplots(3,1, figsize=(10,8), sharex=True)
+        for t, e, w in self:
+            ax1.plot(t, (len(w)/e)*1e6, 'ob')
+            ax2.plot(t, w.mean(), 'ob')
+            ax3.plot(t, np.sum(w**2)/np.sum(w), 'ob')
+        ax1.set(ylabel='rate [arg units]')
+        ax2.set(ylabel='mean weight', ylim=(0,1))
+        ax3.set(ylabel='rms/mean weight',ylim=(0,1))
+        fig.suptitle(self.source_name)
+
+
 class Main(object):
 
     defaults=(
@@ -50,11 +91,24 @@ class Main(object):
         ok = np.logical_not(pd.isna(gd.weight))
         self.photons = gd.loc[ok,:]
         
-    def weights(self):
+    def all_weights(self):
         w = self.data.photon_data.weight
         good = np.logical_not(np.isnan(w))
         return w[good]
 
+    def binned_weights(self):
+        """ return a BinnedWeight object for access to each set of binned weights
+        The object has a index
+        so bw[i] returns a tuple (t, e, w)
+        where t : bin center time (MJD)
+              e : associated exposure
+              w : array of weights for the time range
+        """
+        return BinnedWeights(self.data)
+
+
+    def weight_binner(self, step=None, start=None, stop=None,):
+        pass
     
     def solve(self,  exposure_fraction, estimate=[0,0], fix_beta=False, **fmin_kw):
         """SOlve for alpha and beta for all of current selected data set
@@ -91,76 +145,4 @@ class Main(object):
                     fontdict=dict(family='monospace'), #didn't work
                     )
         
-
-class LogLike(object):
-    """ implemtn Kerr Eqn 2 """
-    
-    def __init__(self, weights,  exposure_fraction):
-
-        self.f = f = exposure_fraction
-        self.w = w = weights 
-        self.S = f * np.sum(w)
-        self.B = f * np.sum(1-w)
-        # alpha,beta starting point for fitting
-        self.estimate= [1/f-1, 1/f-1]
-        
-    def __call__(self, pars ):
-
-        alpha, beta= pars if len(pars)>1 else (pars[0], 0)
-        loglike= np.sum( np.log(1 + alpha*self.w + beta*(1-self.w)  ))\
-                    - alpha*self.S - beta*self.B
-        return -loglike
-
-    def gradient(self, pars ):
-        w = self.w
-        fixed_beta = len(pars)==1
-        if fixed_beta:
-            
-            alpha =  pars[0] 
-            D = 1 + alpha*w
-            return np.sum(w/D) - self.S
-        else:
-            alpha, beta = pars
-            D =  1 + alpha*w + beta*(1-w)
-            da = np.sum(w/D) - self.S
-            db = np.sum((1-w)/D) - self.B
-            return [da,db]  
-        
-    def hessian(self, pars):
-        """reuturn Hessian matrix from explicit second derivatives"""
-        w = self.w
-        fixed_beta = len(pars)==1
-        if fixed_beta:
-            alpha = pars[0]
-            D = 1 + alpha*w 
-            return [np.sum(w/D)]
-        else:
-            alpha, beta= pars
-            Dsq = (1 - alpha*w + beta*(1-w))**2
-            a, b, c = np.sum(w**2/Dsq), np.sum(w*(1-w)/Dsq), np.sum((1-w)**2/Dsq)
-            return np.array([[a,b], [b,c]])
-        
-    def rate(self, fix_beta=False):
-        """Return Normalized rate and variance matrix"""
-        s = self.solve(fix_beta)
-        self.fit_pars = s # for reference
-        h = self.hessian(s)
-        v = 1./h[0] if fix_beta else linalg.inv(h) 
-        return (1+s)*self.f, v*self.f
-            
-    def minimize(self,   fix_beta=False, **fmin_kw):
-        """Minimize the -Log likelihood """
-        kw = dict(disp=False)
-        kw.update(**fmin_kw)
-        return optimize.fmin_cg(self, self.estimate[0:1] if fix_beta else self.estimate, **kw)
-
-    def solve(self, fix_beta=False, **fit_kw):
-        """Solve non-linear equation(s) from  setting gradient to zero """
-        kw = dict()
-        kw.update(**fit_kw)
-        ret = optimize.newton_krylov(self.gradient,
-                                      self.estimate[0:1] if fix_beta else self.estimate, **kw)   
-        return np.array(ret)
-        
-
         
