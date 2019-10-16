@@ -227,7 +227,7 @@ class Data(object):
                 dflist.append(d)
                 if self.verbose>1: print('.', end='')
             else:
-                if self.verbose>1: print('x')
+                if self.verbose>1: print('x', end='')
                 continue
 
         assert len(dflist)>0, '\nNo photon data found?'
@@ -264,7 +264,6 @@ class Data(object):
             d = pickle.load( f ,encoding='latin1')
             tstart = d['tstart']
             if self.mjd_range is not None and MJD(tstart) > self.mjd_range[1]:
-                assert False, 'debug'
                 return None
             df = pd.DataFrame(d['timerec'])
 
