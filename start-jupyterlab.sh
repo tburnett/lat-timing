@@ -25,6 +25,9 @@ if [ "$#" -gt  0 ]; then
 fi
 host=`hostname`
 echo Starting jupyterlab with port $remoteport on $host
+echo "To connect from a remote computer, run:"
+user=`whoami`
+echo "ssh -N -f -L localhost:${remoteport}:localhost:${remoteport} ${user}@${host}.slac.stanford.edu"
 rm -f nohup.out
 nohup jupyter lab --notebook-dir=$here --port=$remoteport --no-browser
 
@@ -32,6 +35,3 @@ nohup jupyter lab --notebook-dir=$here --port=$remoteport --no-browser
 # to connect from a remote computer, run ssh -N -f -L localhost:$localport:localhost:$remoteport $userid@rhel6-64x.slac.stanford.edu
 # I set my localport to correspond to the server machine, to keep track of multiple servers
 
-echo "To connect from a remote computer, run:"
-user=`whoami`
-echo "ssh -N -f -L localhost:${remoteport}:${host}.slac.stanford.edu:${remoteport} ${user}@${host}.slac.stanford.edu"
