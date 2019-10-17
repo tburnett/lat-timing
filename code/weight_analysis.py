@@ -3,18 +3,16 @@
 
 import os, sys
 import numpy as np
-from scipy import optimize
-from numpy import linalg
+# from scipy import optimize
+# from numpy import linalg
 import pandas as pd
 
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
 
-import corner
 
 #local
 from data_management import Data
-import cell
 import keyword_options
 
 
@@ -22,55 +20,67 @@ class BinnedWeights(object):
     """ manage access to weights"""
     
     def __init__(self, data):
+        
         # get predefined bin data and corresponding fractional exposure 
         bins, exposure = data.binner()
         self.bins=bins
+        self.N = len(bins)-1 # number of bins
         self.bin_centers = 0.5*(self.bins[1:]+self.bins[:-1])
         self.fexposure = exposure/np.sum(exposure)
         self.source_name = data.source_name
 
-        # get the photon data with good weights
+        # get the photon data with good weights, not NaN
         w = data.photon_data.weight
         good = np.logical_not(np.isnan(w))
         self.photons = data.photon_data.loc[good]
 
         # use photon times to get indices of bin edges
-        self.weights = self.photons.weight
+        self.weights = w = self.photons.weight
         self.edges = np.searchsorted(self.photons.time, self.bins)
         
+        # estimates for total signal and background
+        self.S = np.sum(w)
+        self.B = np.sum(1-w)
+
+        
     def __repr__(self):
-        return f'{self.__class__.__name__}:  {len(self.fexposure)} cells from {self.bins[0]:.1f} to {self.bins[-1]:.1f} for source {self.source_name}'
+        return f'''{self.__class__}:  
+        {len(self.fexposure)} intervals from {self.bins[0]:.1f} to {self.bins[-1]:.1f} for source {self.source_name}
+        S {self.S:.2f}  B {self.B:.2f} '''
 
     def __getitem__(self, i):
-        # get info for ith time bin
+        """ get info for ith time bin and return dict with time, exposure, weights and S,B value
+        """
         k = self.edges        
-        wts = self.weights[k[i]:] if i>len(k)-3 else self.weights[k[i]:k[i+2]] 
-        tstart,tstop = self.bins[i:i+2]
+        wts = self.weights[k[i]:k[i+1]]
+        exp=self.fexposure[i]
 
-        # create a Cell, as ported from godot. leave off photon times, ignore S2B for now.
-        return cell.Cell(
-            tstart=self.bins[i], 
-            tstop=self.bins[i+1],
-            exposure =  self.fexposure[i], 
-            photon_times = [],
-            photon_weights = wts, 
-            source_to_background_ratio=0.5, ## TODO: needs in;y 
-            )
-        
+        return dict(
+                t=self.bin_centers[i], # time
+                exp=exp*self.N,        # exposure as a fraction of mean, for filtering
+                w=wts,
+                S= exp*self.S,
+                B= exp*self.B,               
+                )
 
     def __len__(self):
-        return len(self.bin_centers)
+        return self.N
 
     def test_plots(self):
-        """ some test plots of properties of the weight distribution"""
-        fig, (ax1,ax2,ax3) = plt.subplots(3,1, figsize=(10,8), sharex=True)
-        for t, e, w in self:
-            ax1.plot(t, (len(w)/e)*1e6, 'ob')
-            ax2.plot(t, w.mean(), 'ob')
-            ax3.plot(t, np.sum(w**2)/np.sum(w), 'ob')
-        ax1.set(ylabel='rate [arg units]')
-        ax2.set(ylabel='mean weight', ylim=(0,1))
-        ax3.set(ylabel='rms/mean weight',ylim=(0,1))
+        """  plots of properties of the weight distribution"""
+        fig, axx = plt.subplots(4,1, figsize=(12,6), sharex=True,
+                                         gridspec_kw=dict(hspace=0))
+        times=[]; vals = []
+        for cell in self:
+            t, e, w = [cell[q] for q in 't exp w'.split()]
+            times.append(t)
+            vals.append( (e, len(w), len(w)/e , w.mean(), np.sum(w**2)/sum(w)))
+        vals = np.array(vals).T
+        print( np.array(vals).shape)
+        for ax, v, ylabel in zip(axx, vals, ['rel exp','counts','rate', 'mean weight', 'rms/mean weight']):
+            ax.plot(times, v, 'ob')
+            ax.set(ylabel=ylabel)
+            ax.grid(alpha=0.5)
         fig.suptitle(self.source_name)
 
 
@@ -82,6 +92,7 @@ class Main(object):
         ('mjd_range', (51910, 54800),'MJD limits to use'),
         ('interval', 5, 'days per time bin'),
         ('weight_file', '../data/geminga_weights.pkl', 'location of pointlike weight file'),
+        ('min_exposure', 0.2, 'ignore bins with exposure less than this')
     )
     
     @keyword_options.decorate(defaults)
@@ -115,36 +126,20 @@ class Main(object):
 
     def binned_weights(self):
         """ return a BinnedWeight object for access to each set of binned weights
-        The object has a index
-        so bw[i] returns a tuple (t, e, w)
-        where t : bin center time (MJD)
-              e : associated exposure
-              w : array of weights for the time range
+        The object can be indexed, or used in a for loop
+        bw[i] returns a  dict (t, exp, w, S, B)
+        where t   : bin center time (MJD)
+              exp : associated exposure as fraction of mean
+              w   : array of weights for the time range
+              S,B : predicted source, background counts for this bin
         """
-        return BinnedWeights(self.data)
-
-
-    def weight_binner(self, step=None, start=None, stop=None,):
-        pass
-    
-    def solve(self,  exposure_fraction, estimate=[0,0], fix_beta=False, **fmin_kw):
-        """SOlve for alpha and beta for all of current selected data set
-           TODO: extend to set of data segments
-        
-        parameters:
-           exposure_fraction : Contribution to total exposure
-           estimate : initial values for (alpha,beta)
-           fix_beta : if True, only fit for alpha
-           
-        returns:
-             fits for alpha,beta
-        """
-        return LogLike(self.weights(), exposure_fraction).solve(estimate, fix_beta, **fmin_kw)
+        return BinnedWeights(self.data,)
 
         
     def corner_plot(self, weighted=False, **kwargs):
         """produce a "corner" plot.
         """
+        import corner
         fig, axx=plt.subplots(3,3, figsize=(10,10))
         corner.corner(self.photons['eband radius weight'.split()], 
                     range=[(-0.75,7.25),(0,5),(0,1)],
