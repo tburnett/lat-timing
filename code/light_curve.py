@@ -9,6 +9,7 @@ import os, sys
 from scipy import (optimize, linalg)
 from scipy.linalg import (LinAlgError, LinAlgWarning)
 
+data=None # data_managment.Data obect for access to name, verbose
 
 class LightCurve(object):
     """ In the language of Kerr, manage a set of cells
@@ -16,7 +17,8 @@ class LightCurve(object):
     
     def __init__(self, binned_weights ):
         
-        self.verbose = binned_weights.verbose
+        global data
+        data=binned_weights.data
         self.cells = [LogLike(ml) for ml in binned_weights] 
          
     def __repr__(self):
@@ -41,7 +43,7 @@ class LightCurve(object):
                 good.append(ll)
         fits = np.array(r)
         self.bad =bad;  self.good=good
-        if self.verbose>0:
+        if data.verbose>0:
             print(f'Fits: {len(good)} good, {len(bad)} failed ')
         self.fit_df=  pd.DataFrame([[c.t for c in good],
                               [c.exp for c in good],fits[:,0], fits[:,1]],
@@ -59,7 +61,35 @@ class LightCurve(object):
         fig, ax = plt.subplots(figsize=(12,4))
         ax.errorbar(x=t, y=y, yerr=dy, fmt='+')
         ax.axhline(1., color='grey')
+        ax.set(xlabel='MJD', ylabel='relative rate')
+        ax.set_title(title or data.source_name)
         ax.grid(alpha=0.5)
+        
+    def fit_hists(self, title=None):
+        df = self.fit_df
+        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,3))
+        x = df.time
+        y = df.rate
+        yerr = df.sigma
+
+        def shist(ax, x,  xlim, nbins, label, log=False): 
+            def space(xlim, nbins=50):
+                if log:
+                    return np.logspace(np.log10(xlim[0]), np.log10(xlim[1]))
+                return np.linspace(xlim[0], xlim[1], nbins+1)
+            info = f'mean {x.mean():.3f}\nstd  {x.std():.3f}'
+            ax.hist(x.clip(*xlim), bins=space(xlim, nbins), histtype='step', lw=2, label=info)
+            ax.set(xlabel=label, xscale='log' if log else 'linear')
+            ltit=ax.legend(prop=dict(size=10, family='monospace')).get_title()
+            ltit.set_fontsize(8); ltit.set_family('monospace')
+            ax.grid(alpha=0.5)
+            return ax
+        shist(ax2, yerr, (1e-2, 1.0), 25, 'sigma', log=True)
+        shist(ax1, y, (0.1, 10), 25, 'rate', log=True).axvline(1, color='grey')
+        pull = (y-1)/yerr
+        shist(ax3, pull, (-4,4), 25,'pull').axvline(0,color='grey')
+        fig.suptitle(title or data.source_name)
+
     
     
 """Implement maximizaion of weighted log likeliood
@@ -68,12 +98,13 @@ class LogLike(object):
     """ implement Kerr Eqn 2 for a single interval, or cell"""
     
     def __init__(self, cell):
+        
         self.__dict__.update(cell)
 
         self.estimate= [0, 0]
         
     def __call__(self, pars ):
-        """ evaluate the log likelihood (not really used)"""
+        """ evaluate the log likelihood """
 
         alpha, beta= pars if len(pars)>1 else (pars[0], 0.)
         loglike= np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
@@ -82,7 +113,7 @@ class LogLike(object):
 
     def __repr__(self):
         return f'''{self.__class__}
-        time {self.t:.3f} exposure {self.exp:.2e} S {self.S:.2f}, B {self.B:.2f}
+        time {self.t:.3f} exposure {self.exp:.2f} S {self.S:.0f}, B {self.B:.0f}
         {len(self.w)} weights, mean {self.w.mean():.2f}, std {self.w.std():.2f}'''
         
     def gradient(self, pars ):
@@ -102,7 +133,7 @@ class LogLike(object):
             return [da,db]  
         
     def hessian(self, pars):
-        """reuturn Hessian matrix (1 or 2 D according to parsfrom explicit second derivatives
+        """return Hessian matrix (1 or 2 D according to pars) from explicit second derivatives
         Note this is also the Jacobian of the gradient.
         """
         w = self.w
@@ -119,7 +150,7 @@ class LogLike(object):
         
     def rate(self, fix_beta=False, debug=False):
         """Return signal rate and its error"""
-        
+        #TODO: return upper limit if TS<?
         try:
             s = self.solve(fix_beta)
             if s is None:
@@ -129,7 +160,7 @@ class LogLike(object):
             v = 1./h[0] if fix_beta else linalg.inv(h)[0,0]
             return (1+s[0]), np.sqrt(v)
         except (LinAlgError, LinAlgWarning, RuntimeWarning) as msg:
-            if debug:
+            if debug or data.verbose>2:
                 print(f'Fit error, cell {self},\n\t{msg}')
             return None
             
@@ -150,7 +181,7 @@ class LogLike(object):
         try:
             ret = optimize.fsolve(self.gradient, estimate , **kw)   
         except RuntimeWarning as msg:
-            if debug:
+            if debug or data.verbose>2:
                 print(f'Runtime fsolve warning for cell {self}\n\t {msg}')
             return None
         return np.array(ret)

@@ -87,9 +87,10 @@ class Data(object):
         estop = self.exposure.stop.values
 
         #set up bins from args or use defaults; adjust stop to come out even
+        # note round to whole day
         step = step or self.interval
-        start = start or estart[0]
-        stop =  stop  or estop[-1]
+        start = np.round(start or estart[0])
+        stop =  np.round(stop  or estop[-1])
         nbins = int(round((stop-start)/step))
         time_bins = np.linspace(start, start+nbins*step, nbins+1)
         
@@ -458,6 +459,7 @@ class BinnedWeights(object):
     def __init__(self, data):
         
         # get predefined bin data and corresponding fractional exposure 
+        self.data = data 
         bins, exposure = data.binner()
         self.bins=bins
         self.N = len(bins)-1 # number of bins
@@ -513,6 +515,8 @@ class BinnedWeights(object):
         times=[]; vals = []
         for cell in self:
             t, e, w = [cell[q] for q in 't exp w'.split()]
+            if e==0:
+                continue
             times.append(t)
             vals.append( (e, len(w), len(w)/e , w.mean(), np.sum(w**2)/sum(w)))
         vals = np.array(vals).T
