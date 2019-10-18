@@ -16,6 +16,7 @@ import keyword_options
 
 mission_start = Time('2001-01-01T00:00:00', scale='utc').mjd
 day = 24*3600.
+first_data=54683
 
 def MJD(met):
     "convert MET to MJD"
@@ -49,7 +50,6 @@ class Data(object):
         ('energy_domain', 'np.logspace(2,5,13)', 'energy bins for exposure calculation'),
         ('nside', 1024, 'HEALPix nside which was used to bin photon data positions'),
         ('ignore_gti', False, ''),
-        ('no_time_check', True, 'do not check photon times'),
     )
 
     @keyword_options.decorate(defaults)
@@ -67,13 +67,7 @@ class Data(object):
         self.exposure =  self._process_ft2(ft2_files,self.gti)
         photon_data = self._process_data(data_files, self.gti)
 
-        # final edit of photon data to remove any not in the exposure range 
-        if self.no_time_check:
-            self.photon_data = photon_data
-            if self.verbose>1:
-                print('not checking photons for time in bin')
-        else:
-            self.photon_data =self._check_photons(self.exposure, photon_data)
+        self.photon_data =self._check_photons(self.exposure, photon_data)
 
 
     def binner(self, step=None, start=None, stop=None,):
@@ -112,32 +106,6 @@ class Data(object):
 
         return time_bins, binned_exposure
 
-    def count_binner(self, step=None, start=None, stop=None, cut=None):
-        """ Bin the number of counts
-
-        parameters:
-            step : bin size, default self.interval
-            start, stop: optional: default to ends
-            cut : (not implemented)
-
-        return: a DataFrame with fields
-            time  : bin center times in MJD
-            exp   : exposure integrated over the bin
-            counts: photon counts, all data (for now)
-        """
-        # TODO: allow for multiple cut strings, make counts an array of corresponding counts
-
-        time_bins, binned_exposure = self.binner(step, start, stop)
-        if cut is not None:
-            ptime = self.photon_data.query(cut).time.values #  pkoton times in MJD units
-            if self.verbose>0:
-                print(f'Binner selected {len(ptime)}/{len(self.photon_data)} photons with query "{cut}"')
-        else:
-            ptime = self.photon_data.time.values
-        # use np.histogram to bin the photons
-        binned_time = np.histogram(ptime, time_bins)[0]
-        
-        return pd.DataFrame(dict(time= (time_bins[1:]+time_bins[:-1])/2, exp=binned_exposure, counts=binned_time))
             
     def add_weights(self, filename):
         """Add weights to the photon data
@@ -203,7 +171,7 @@ class Data(object):
 
 
         if mjd_range is not None:
-            mjd_range = np.array(mjd_range).clip(mission_start, None)
+            mjd_range = np.array(mjd_range).clip(first_data, None)
             tlim =Time(mjd_range, format='mjd').datetime
             ylim,mlim = np.array([t.year for t in tlim])-2008, np.array([t.month for t in tlim])-1
             year_range = ylim.clip(0, len(gti_files)) + np.array([0,1])
@@ -483,4 +451,75 @@ class Data(object):
         if self.verbose>1:
             print(f'\t{gti}')
         return gti
+    
+class BinnedWeights(object):
+    """ manage access to weights"""
+    
+    def __init__(self, data):
         
+        # get predefined bin data and corresponding fractional exposure 
+        bins, exposure = data.binner()
+        self.bins=bins
+        self.N = len(bins)-1 # number of bins
+        self.bin_centers = 0.5*(self.bins[1:]+self.bins[:-1])
+        self.fexposure = exposure/np.sum(exposure)
+        self.source_name = data.source_name
+        self.verbose = data.verbose
+
+        # get the photon data with good weights, not NaN
+        w = data.photon_data.weight
+        good = np.logical_not(np.isnan(w))
+        self.photons = data.photon_data.loc[good]
+
+        # use photon times to get indices of bin edges
+        self.weights = w = self.photons.weight
+        self.edges = np.searchsorted(self.photons.time, self.bins)
+        
+        # estimates for total signal and background
+        self.S = np.sum(w)
+        self.B = np.sum(1-w)
+
+        
+    def __repr__(self):
+        return f'''{self.__class__}:  
+        {len(self.fexposure)} intervals from {self.bins[0]:.1f} to {self.bins[-1]:.1f} for source {self.source_name}
+        S {self.S:.2f}  B {self.B:.2f} '''
+
+    def __getitem__(self, i):
+        """ get info for ith time bin and return dict with time, exposure, weights and S,B value
+        """
+        k = self.edges        
+        wts = self.weights[k[i]:k[i+1]]
+        exp=self.fexposure[i]
+
+        return dict(
+                t=self.bin_centers[i], # time
+                exp=exp*self.N,        # exposure as a fraction of mean, for filtering
+                w=wts,
+                S= exp*self.S,
+                B= exp*self.B,               
+                )
+
+    def __len__(self):
+        return self.N
+
+    def test_plots(self):
+        """Make a set of plots of exposure, counts, properties of weights
+        """
+        import matplotlib.pyplot as plt
+        """  plots of properties of the weight distribution"""
+        fig, axx = plt.subplots(5,1, figsize=(12,8), sharex=True,
+                                         gridspec_kw=dict(hspace=0,top=0.95),)
+        times=[]; vals = []
+        for cell in self:
+            t, e, w = [cell[q] for q in 't exp w'.split()]
+            times.append(t)
+            vals.append( (e, len(w), len(w)/e , w.mean(), np.sum(w**2)/sum(w)))
+        vals = np.array(vals).T
+        for ax, v, ylabel in zip(axx, vals,
+                            ['rel exp','counts','count rate', 'mean weight', 'rms/mean weight']):
+            ax.plot(times, v, '+b')
+            ax.set(ylabel=ylabel)
+            ax.grid(alpha=0.5)
+        axx[-1].set(xlabel='MJD')
+        fig.suptitle(self.source_name)

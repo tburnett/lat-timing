@@ -10,8 +10,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
 import keyword_options
-import exposure 
-from data_management import Data, MJD
+#import exposure 
+from data_management import Data, BinnedWeights
 
 
 class Main(object):
@@ -24,6 +24,7 @@ class Main(object):
         ('radius',  5, 'cone radius for selection [deg]'),
         ('interval', 2, 'Binning time interval [days]'),
         ('mjd_range', None, 'Range of MJD: default all data'),
+        ('weight_file', None, 'file name to fine weight'),
 
        )
     
@@ -38,11 +39,38 @@ class Main(object):
         keyword_options.process(self,kwargs)
 
         self._set_geometry(name, position)
-        self.data = Data(self)
+        self.data = Data(self, source_name=name, verbose=self.verbose)
         self.df = self.data.photon_data
+        
+        if self.weight_file:
+            self._process_weights()
+            
+    def binned_weights(self):
+        """ return a BinnedWeight object for access to each set of binned weights
+            The object can be indexed, or used in a for loop
+            bw[i] returns a  dict (t, exp, w, S, B)
+            where t   : bin center time (MJD)
+                  exp : associated exposure as fraction of mean
+                  w   : array of weights for the time range
+                  S,B : predicted source, background counts for this bin
+            """
+        return BinnedWeights(self.data,)
 
+    def _process_weights(self):
+        # add the weights to the photon dataframe
+        wtd = self.data.add_weights(self.weight_file)
+        # get info from weights file
+        vals = [wtd[k] for k in 'model_name roi_name source_name source_lb '.split()]
+        lbformat = lambda lb: '{:.2f}, {:.2f}'.format(*lb)
+        self.model_info='\n  {}\n  {}\n  {}\n  {}'.format(vals[0], vals[1], vals[2], lbformat(vals[3]))
 
+        # add a energy band column, filter out photons with NaN         
+        gd = self.data.photon_data
+        gd.loc[:,'eband']=(gd.band.values//2).clip(0,7)
 
+        ok = np.logical_not(pd.isna(gd.weight))
+        self.photons = gd.loc[ok,:]
+    
     def _set_geometry(self, name, position):
         self.name=name
         if position is None:
