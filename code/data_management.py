@@ -11,7 +11,7 @@ from scipy.integrate import simps
 from astropy.io import fits
 from astropy.time import Time, TimeDelta
 from astropy.coordinates import SkyCoord
-from exposure import EffectiveArea
+from effective_area import EffectiveArea
 import keyword_options
 
 mission_start = Time('2001-01-01T00:00:00', scale='utc').mjd
