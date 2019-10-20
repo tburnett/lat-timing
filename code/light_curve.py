@@ -30,26 +30,28 @@ class LightCurve(object):
     def __len__(self):
         return len(self.cells)
     
-    def fit(self, fix_beta=False):
+    def fit(self, fix_beta=False, no_ts=True):
         """create a DataFrame of the fit
         """
-        r=[]; bad=[]; good=[]
+        r=[]; bad=[]; good=[]; ts=[]
         for ll in self:
-            s = ll.rate(fix_beta=fix_beta)
-            if s is None: 
+            result = ll.rate(fix_beta=fix_beta, no_ts=no_ts)
+            if result is None: 
                 bad.append(ll)
             else:
-                r.append(list(s))
+                s, sig, t = result
+                r.append([s, sig])
+                ts.append(t)
                 good.append(ll)
         fits = np.array(r)
         self.bad =bad;  self.good=good
         if data.verbose>0:
             print(f'Fits: {len(good)} good, {len(bad)} failed ')
         self.fit_df=  pd.DataFrame([[c.t for c in good],
-                              [c.exp for c in good],fits[:,0], fits[:,1]],
-                      index='time exp rate sigma'.split()).T
+                              [c.exp for c in good],fits[:,0], fits[:,1],ts],
+                      index='time exp rate sigma ts'.split()).T
         
-    def rate_plot(self,fix_beta=False, title=None): 
+    def rate_plot(self,fix_beta=False, title=None, ax=None): 
         if not hasattr(self, 'fit_df'):
             self.fit(fix_beta)
 
@@ -58,7 +60,10 @@ class LightCurve(object):
         y=  df.rate.values.clip(0,4)
         dy= df.sigma.values.clip(0,4)
         
-        fig, ax = plt.subplots(figsize=(12,4))
+        if not ax:
+            fig, ax = plt.subplots(figsize=(12,4))
+        else:
+            fig =ax.figures()
         ax.errorbar(x=t, y=y, yerr=dy, fmt='+')
         ax.axhline(1., color='grey')
         ax.set(xlabel='MJD', ylabel='relative rate')
@@ -148,7 +153,7 @@ class LogLike(object):
             a, b, c = np.sum(w**2/Dsq), np.sum(w*(1-w)/Dsq), np.sum((1-w)**2/Dsq)
             return np.array([[a,b], [b,c]])
         
-    def rate(self, fix_beta=False, debug=False):
+    def rate(self, fix_beta=False, debug=False, no_ts=True):
         """Return signal rate and its error"""
         #TODO: return upper limit if TS<?
         try:
@@ -158,7 +163,9 @@ class LogLike(object):
             h = self.hessian(s)
         
             v = 1./h[0] if fix_beta else linalg.inv(h)[0,0]
-            return (1+s[0]), np.sqrt(v)
+            ts = None if no_ts else (0 if s[0]<=-1 else 2*(self(s)-self([-1,s[1]])))
+            return (1+s[0]), np.sqrt(v/2), ts
+        
         except (LinAlgError, LinAlgWarning, RuntimeWarning) as msg:
             if debug or data.verbose>2:
                 print(f'Fit error, cell {self},\n\t{msg}')

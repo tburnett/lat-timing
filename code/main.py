@@ -80,7 +80,7 @@ class Main(object):
         else:
             self.l,self.b = position
         if self.verbose>0:
-            print(f'Selected position: (l,b)=({self.l:.3f},{self.b:.3f}), radius={self.radius}')
+            print(f'Source {self.name} at: (l,b)=({self.l:.3f},{self.b:.3f}); ROI radius={self.radius}')
     
 
     def plot_normalized_rate(self, step=None, min_exposure_factor=0.3, data_cut=None):
