@@ -579,13 +579,13 @@ class CellLogLikelihood(object):
             t[:] = aopt*we + iw
             # use Taylor approximation to get initial guess
             f2 = np.abs(np.sum((we/t)**2))
-            amin = aopt - np.sqrt(2*dlogl/f2)
+            amin = max(0,aopt - np.sqrt(2*dlogl/f2))
             # do a few NR iterations
             for i in range(5):
                 t[:] = amin*we+iw
                 f0 = np.log(t).sum()-amin*S+dlogl-llmax
                 f1 = np.sum(we/t)-S
-                amin = amin - f0/f1
+                amin = max(0,amin - f0/f1)
                 if abs(f0) < 0.1:
                     break
         amin = max(0,amin)
