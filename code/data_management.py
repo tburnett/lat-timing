@@ -474,7 +474,7 @@ class BinnedWeights(object):
         self.photons = data.photon_data.loc[good]
 
         # use photon times to get indices of bin edges
-        self.weights = w = self.photons.weight
+        self.weights = w = self.photons.weight.values
         self.edges = np.searchsorted(self.photons.time, self.bins)
         
         # estimates for total signal and background

@@ -90,7 +90,7 @@ class LightCurve(object):
         hkw.update(hist_kw)
 
         df = self.fit_df
-        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,3))
+        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,2.5))
         x = df.time
         y = df.rate
         yerr = df.sigma
@@ -163,7 +163,7 @@ class LogLike(object):
             return [np.sum((w/D)**2)]
         else:
             alpha, beta= pars
-            Dsq = (1 - alpha*w + beta*(1-w))**2
+            Dsq = (1 + alpha*w + beta*(1-w))**2
             a, b, c = np.sum(w**2/Dsq), np.sum(w*(1-w)/Dsq), np.sum((1-w)**2/Dsq)
             return np.array([[a,b], [b,c]])
         
@@ -207,4 +207,27 @@ class LogLike(object):
             return None
         return np.array(ret)
         
+    def loglikeplot(ll,fix_beta=False, xlim=(-0.2,0.2),ax=None, title=None):
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(4,2))
+        else: fig=ax.figure
+        dom = np.linspace(*xlim)
+        v, s, ts = ll.rate(fix_beta=fix_beta, debug=True)
+        if fix_beta:
+            f = lambda x: ll([x])
+            a, beta = v-1, 0.
+        else:
+            a, beta = ll.solve(fix_beta, debug=True)
+            assert abs(a-v+1)<1e-6, f'{a},{v}, {a-v+1}'
+            f = lambda x: ll([x, beta])
+        ax.plot(dom, list(map(f,dom)) )
+
+        ax.plot(a, f(a), 'or')
+        ax.plot([a-s, a+s], [f(a-s), f(a+s)], '-k',lw=2)
+        for x in (a-s,a+s):
+            ax.plot([x,x], [f(x)-0.1, f(x)+0.1], '-k',lw=2)
+        ax.plot(a, f(a)-0.5, '-ok', ms=10)
+        ax.grid()
+        ax.set(title=title, xlim=xlim, ylim=(f(a)-4, f(a)+0.2), 
+               ylabel='log likelihood', xlabel=r'$\alpha$')
         
