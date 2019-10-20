@@ -1,5 +1,5 @@
-"""Manage light rate
-Also has likelihood maximization 
+"""Manage the binned time data to produce light curves, etc.
+
 """
 import numpy as np
 import pylab as plt
@@ -8,18 +8,31 @@ import os, sys
 
 from scipy import (optimize, linalg)
 from scipy.linalg import (LinAlgError, LinAlgWarning)
+import keyword_options
 
-data=None # data_managment.Data obect for access to name, verbose
+data=None # data_managment.Data obect for access to name, verbose, etc.
 
 class LightCurve(object):
     """ In the language of Kerr, manage a set of cells
     """
-    
-    def __init__(self, binned_weights ):
-        
+    defaults=(
+        ('min_exp', 0.3, 'mimimum exposure factor'),
+    )
+    @keyword_options.decorate(defaults)
+    def __init__(self, binned_weights, **kwargs):
+        """Load binned data
+        parameters:
+            binned_weights : an iterable object that is a list of dicts; expect each to have
+                 keys t, exp, w, S, B
+            min_exp : filter by exposure factor
+        """
+        keyword_options.process(self,kwargs)
         global data
         data=binned_weights.data
-        self.cells = [LogLike(ml) for ml in binned_weights] 
+        self.cells = [LogLike(ml) for ml in binned_weights if ml['exp']>self.min_exp] 
+        if data.verbose>0:
+            print(f'Loaded {len(self)} / {len(binned_weights)} cells with exposure > {self.min_exp} for light curve analysis')
+    
          
     def __repr__(self):
         return f'{self.__class__} {len(self.cells)} cells loaded'
@@ -31,7 +44,7 @@ class LightCurve(object):
         return len(self.cells)
     
     def fit(self, fix_beta=False, no_ts=True):
-        """create a DataFrame of the fit
+        """Perform fits to all intervals, set a DataFrame with results
         """
         r=[]; bad=[]; good=[]; ts=[]
         for ll in self:
@@ -44,7 +57,7 @@ class LightCurve(object):
                 ts.append(t)
                 good.append(ll)
         fits = np.array(r)
-        self.bad =bad;  self.good=good
+        self.bad =bad # save list for later study
         if data.verbose>0:
             print(f'Fits: {len(good)} good, {len(bad)} failed ')
         self.fit_df=  pd.DataFrame([[c.t for c in good],
@@ -63,39 +76,41 @@ class LightCurve(object):
         if not ax:
             fig, ax = plt.subplots(figsize=(12,4))
         else:
-            fig =ax.figures()
+            fig =ax.figure
         ax.errorbar(x=t, y=y, yerr=dy, fmt='+')
         ax.axhline(1., color='grey')
         ax.set(xlabel='MJD', ylabel='relative rate')
         ax.set_title(title or data.source_name)
         ax.grid(alpha=0.5)
         
-    def fit_hists(self, title=None):
+    def fit_hists(self, title=None, **hist_kw):
+        """ Generate set of histograms of rate, error, pull, and maybe TS
+        """
+        hkw = dict(log=True, histtype='stepfilled',lw=2, edgecolor='blue', facecolor='lightblue')
+        hkw.update(hist_kw)
+
         df = self.fit_df
         fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,3))
         x = df.time
         y = df.rate
         yerr = df.sigma
 
-        def shist(ax, x,  xlim, nbins, label, log=False): 
+        def shist(ax, x,  xlim, nbins, label, xlog=False): 
             def space(xlim, nbins=50):
-                if log:
+                if xlog:
                     return np.logspace(np.log10(xlim[0]), np.log10(xlim[1]))
                 return np.linspace(xlim[0], xlim[1], nbins+1)
-            info = f'mean {x.mean():.3f}\nstd  {x.std():.3f}'
-            ax.hist(x.clip(*xlim), bins=space(xlim, nbins), histtype='step', lw=2, label=info)
-            ax.set(xlabel=label, xscale='log' if log else 'linear')
-            ltit=ax.legend(prop=dict(size=10, family='monospace')).get_title()
-            ltit.set_fontsize(8); ltit.set_family('monospace')
+            info = f'mean {x.mean():6.3f}\nstd  {x.std():6.3f}'
+            ax.hist(x.clip(*xlim), bins=space(xlim, nbins), **hkw)
+            ax.set(xlabel=label, xscale='log' if xlog else 'linear', ylim=(0.8,None))
+            ax.text(0.65, 0.84, info, transform=ax.transAxes,fontdict=dict(size=10, family='monospace')) 
             ax.grid(alpha=0.5)
             return ax
-        shist(ax2, yerr, (1e-2, 1.0), 25, 'sigma', log=True)
-        shist(ax1, y, (0.1, 10), 25, 'rate', log=True).axvline(1, color='grey')
-        pull = (y-1)/yerr
-        shist(ax3, pull, (-4,4), 25,'pull').axvline(0,color='grey')
-        fig.suptitle(title or data.source_name)
 
-    
+        shist(ax1, y, (0.2, 5), 25, 'relative rate', xlog=True).axvline(1, color='grey')
+        shist(ax2, yerr, (1e-2, 0.3), 25, 'sigma', xlog=True)
+        shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
+        fig.suptitle(title or data.source_name+' fit summary')
     
 """Implement maximizaion of weighted log likeliood
 """
@@ -105,7 +120,6 @@ class LogLike(object):
     def __init__(self, cell):
         
         self.__dict__.update(cell)
-
         self.estimate= [0, 0]
         
     def __call__(self, pars ):
@@ -146,7 +160,7 @@ class LogLike(object):
         if fixed_beta:
             alpha = pars[0]
             D = 1 + alpha*w 
-            return [np.sum(w/D)]
+            return [np.sum((w/D)**2)]
         else:
             alpha, beta= pars
             Dsq = (1 - alpha*w + beta*(1-w))**2
@@ -164,7 +178,7 @@ class LogLike(object):
         
             v = 1./h[0] if fix_beta else linalg.inv(h)[0,0]
             ts = None if no_ts else (0 if s[0]<=-1 else 2*(self(s)-self([-1,s[1]])))
-            return (1+s[0]), np.sqrt(v/2), ts
+            return (1+s[0]), np.sqrt(v), ts
         
         except (LinAlgError, LinAlgWarning, RuntimeWarning) as msg:
             if debug or data.verbose>2:
@@ -189,7 +203,7 @@ class LogLike(object):
             ret = optimize.fsolve(self.gradient, estimate , **kw)   
         except RuntimeWarning as msg:
             if debug or data.verbose>2:
-                print(f'Runtime fsolve warning for cell {self}\n\t {msg}')
+                print(f'Runtime fsolve warning for cell {self}, \n\t {msg}')
             return None
         return np.array(ret)
         
