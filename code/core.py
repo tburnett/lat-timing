@@ -1,5 +1,7 @@
+"""Imported from godot/core.py
+* convert to python 3
+"""
 
-import keyword_options
 import numpy as np
 import pylab as plt
 
@@ -10,10 +12,6 @@ from scipy.integrate import simps,cumtrapz
 from scipy.optimize import fmin,fsolve,fmin_tnc,brentq
 from scipy.interpolate import interp1d
 
-
-# MET bounds for 8-year data set used for FL8Y and 4FGL
-t0_8year = 239557007.6
-t1_8year = 491999980.6
 
 def met2mjd(times,mjdref=51910+7.428703703703703e-4):
     times = np.asarray(times,dtype=np.float128)
@@ -938,7 +936,7 @@ class CellsLogLikelihood(object):
         """ Return a flux density light curve for the raw cells.
         """
 
-        plot_phase = plot_phase or isinstance(self,PhaseCellsLogLikelihood)
+        plot_phase = plot_phase ## THB not checked yet or isinstance(self,PhaseCellsLogLikelihood)
 
         # time, terr, yval, yerrlo,yerrhi; yerrhi=-1 if upper limit
         rvals = np.empty([len(self.clls),5])
@@ -1015,8 +1013,8 @@ class CellsLogLikelihood(object):
         # now, do same for Bayesian blocks
         if not no_bb:
             bb_idx,bb_ts,var_ts,var_dof,fitness = self.do_bb(prior=bb_prior)
-            print(var_ts,var_dof)
-            print('Variability significance: ',chi2.sf(var_ts,var_dof))
+            #print(var_ts,var_dof)
+            print(f'Variability significance: {chi2.sf(var_ts,var_dof):.2e}')
             bb_idx = np.append(bb_idx,len(self.cells))
             rvals_bb = np.empty([len(bb_idx)-1,5])
             for ibb,(start,stop) in enumerate(zip(bb_idx[:-1],bb_idx[1:])):
@@ -1064,7 +1062,7 @@ class CellsLogLikelihood(object):
         """ Return a flux density light curve for the raw cells.
         """
 
-        plot_phase = plot_phase or isinstance(self,PhaseCellsLogLikelihood)
+        plot_phase = False #### plot_phase or isinstance(self,PhaseCellsLogLikelihood)
 
         # now, do same for Bayesian blocks
         bb_idx,bb_ts,var_ts,var_dof,fitness = self.do_bb(prior=bb_prior)
@@ -1110,6 +1108,21 @@ class CellsLogLikelihood(object):
         self.cells += [c.copy(phase_offset=+1) for c in cells]
         self.profile_background = False
                 
+
+def cell_from_cells(cells):
+    """ Return a single Cell object for multiple cells."""
+
+    cells = sorted(cells,key=lambda cell:cell.tstart)
+    tstart = cells[0].tstart
+    we = np.concatenate([c.we for c in cells])
+    ti = np.concatenate([c.we for c in cells])
+    exp = np.sum((c.exp for c in cells))
+    ### THB slight mod to deal with apparent round-off for me
+    #if not np.all(np.asarray([c.SonB for c in cells])==cells[0].SonB):
+    if np.array([x.SonB for x in cells]).std()>1e-6:
+        raise Exception('Cells do not all have same source flux!')
+    return Cell(cells[0].tstart,cells[-1].tstop,exp,ti,we,cells[0].SonB)
+
 def plot_clls_lc(rvals,ax=None,scale='linear',min_mjd=None,max_mjd=None,
         ul_color='C1',meas_color='C0'):
     """ Make a plot of the output lc CellsLogLikelihood.get_lightcurve.
