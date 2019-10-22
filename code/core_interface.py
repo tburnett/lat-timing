@@ -49,7 +49,8 @@ class CoreInterface(object):
     def lightcurve(self, dataframe=True, *pars):
         rvals =  self.cll.get_lightcurve(*pars)
         if not dataframe: return rvals
-        return pd.DataFrame([rvals[:,0],rvals[:,2], rvals[:,3], ], index='time rate error'.split()).T
+        return pd.DataFrame([rvals[:,0],rvals[:,2], 0.5*(rvals[:,3]+rvals[:,4]), ],
+                            index='time rate error'.split()).T
     
     def bb_lightcurve(self, *pars):
         return self.cll.get_bb_lightcurve(*pars)
