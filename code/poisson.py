@@ -10,7 +10,7 @@ from scipy import optimize, special, polyfit, stats
 
 
 class Poisson(object):
-    """log of the three-parameter Poisson-like function use to represent the flux likelihood
+    """log of the three-parameter Poisson-like function used to represent the flux likelihood
     parameters are, in order:
         sp : flux at peak, if positive; if negative, there is only a limit
         e  : normalization factor to convert flux to equivalent counts. must be >0
@@ -78,7 +78,7 @@ class Poisson(object):
     def __str__(self):
 
         e, beta, mu = self.altpars()
-        return 'Poisson: mu,beta= %.1f, %.1f' %( mu, beta)
+        return f'Poisson: mu,beta= {mu:.1f}, {beta:.1f}' 
     
     def __repr__(self):
         if self.flux==0:

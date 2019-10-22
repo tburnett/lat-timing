@@ -20,6 +20,7 @@ class LightCurve(object):
     """
     defaults=(
         ('min_exp', 0.3, 'mimimum exposure factor'),
+        ('fitter', None, 'name of the likelihood fitter: poiss or gauss')
     )
     @keyword_options.decorate(defaults)
     def __init__(self, binned_weights, **kwargs):
@@ -46,8 +47,9 @@ class LightCurve(object):
     def __len__(self):
         return len(self.cells)
     
-    def fit(self, fix_beta=False, no_ts=True):
-        """Perform fits to all intervals, set a DataFrame with results
+    def fit(self, fix_beta=True, no_ts=True):
+        """Perform fits to all intervals assuming likelihood are normally distributed,
+                set a DataFrame with results
         """
         r=[]; bad=[]; good=[]; ts=[]
         for ll in self:
@@ -65,38 +67,48 @@ class LightCurve(object):
             print(f'Fits: {len(good)} good, {len(bad)} failed ')
         self.fit_df=  pd.DataFrame([[c.t for c in good],
                               [c.exp for c in good],fits[:,0], fits[:,1],ts],
-                      index='time exp rate sigma ts'.split()).T
-    def poiss_fit(self):
-        """ fit using poisson fitter        
+                      index='t exp flux error ts'.split()).T
+        self.fiter='gauss'
+        
+    def poiss_fit(self, **kwargs):
+        """ fit using poisson fitter  
+        
         """
         # set global 
         assume_rate=True
         pdict=dict()
         for i,q in enumerate(self):
             try:
-                fmax = max(0, q.solve(fix_beta=True))
-                pf =poisson.PoissonFitter(q, fmax=fmax)
-                p = pf.poiss
+#                 fmax = max(0, q.solve(fix_beta=True))
+#                 pf =poisson.PoissonFitter(q, fmax=fmax)
+                p = q.fit_poisson().poiss
 
                 pdict[i] = dict(t=q.t, flux=np.round(p.flux,4), exp=q.exp, 
                                 errors=np.abs(np.array(p.errors)-p.flux).round(3),
-                                limit=np.round(p.cdfinv(0.5),3), ts=np.round(p.ts,3) ) 
+                                limit=np.round(p.cdfinv(0.5),3), ts=np.round(p.ts,3), poiss=p ) 
             except Exception as msg:
                 print(f'Fail for Index {i}, LogLike {q}\n   {msg}')
                 raise
         self.fit_df = pd.DataFrame.from_dict(pdict,orient='index', dtype=np.float32)  
         assume_rate=False
+        self.fitter='poiss'
         if data.verbose>0:
             print(f'Fit {len(self)} intervals: columns (t, exp, flux, errors, limit, ts) in a DataFrame.')
                 
-    def rate_plot(self,fix_beta=False, title=None, ax=None): 
-        if not hasattr(self, 'fit_df'):
+    def flux_plot(self,fix_beta=False, title=None, ax=None): 
+        if self.fitter is None:
             self.fit(fix_beta)
 
         df=self.fit_df
-        t = df.time
-        y=  df.rate.values.clip(0,4)
-        dy= df.sigma.values.clip(0,4)
+        t = df.t
+        y=  df.flux.values.clip(0,4)
+        if self.fitter=='poiss':
+            errors = df.errors.apply(lambda x: 0.5*(x[0]+x[1]))
+        elif self.fitter=='gauss':
+            errors = df.error
+        else:
+            raise Exception(f'unrecognized fitter: {self.fitter}')
+        dy= errors.values.clip(0,4)
         
         if not ax:
             fig, ax = plt.subplots(figsize=(12,4))
@@ -116,7 +128,7 @@ class LightCurve(object):
 
         df = self.fit_df
         fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,2.5))
-        x = df.time
+        x = df.t
         y = df.rate
         yerr = df.sigma
 
@@ -178,6 +190,16 @@ class LogLike(object):
         return f'''{self.__class__}
         time {self.t:.3f}, {len(self.w)} weights,  exposure {self.exp:.2f}, S {self.S:.0f}, B {self.B:.0f}'''
         
+    def fit_poisson(self):
+        """ return a Poisson representation of this function (assuming flux)
+        """
+        global assume_rate
+        t = assume_rate; assume_rate=True
+        fmax=max(0, self.solve()[0])
+        ret = poisson.PoissonFitter(self, fmax=fmax)
+        assume_rate=t
+        return ret
+
     def gradient(self, pars ):
         """gradient of the log likelihood with respect to alpha and beta, or just alpha
         """
@@ -220,7 +242,7 @@ class LogLike(object):
         """Return signal rate and its error"""
         #TODO: return upper limit if TS<?
         try:
-            s = self.solve(fix_beta or self.assume_rate)
+            s = self.solve(fix_beta or assume_rate)
             if s is None:
                 return None
             h = self.hessian(s)
