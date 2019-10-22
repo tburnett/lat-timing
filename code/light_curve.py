@@ -36,7 +36,7 @@ class LightCurve(object):
         self.cells = [LogLike(ml) for ml in binned_weights if ml['exp']>self.min_exp] 
         if data.verbose>0:
             print(f'Loaded {len(self)} / {len(binned_weights)} cells with exposure > {self.min_exp} for light curve analysis')
-    
+        self.representation = None
          
     def __repr__(self):
         return f'{self.__class__} {len(self.cells)} cells loaded'
@@ -68,7 +68,7 @@ class LightCurve(object):
         self.fit_df=  pd.DataFrame([[c.t for c in good],
                               [c.exp for c in good],fits[:,0], fits[:,1],ts],
                       index='t exp flux error ts'.split()).T
-        self.fiter='gauss'
+        self.representation='gauss'
         
     def poiss_fit(self, **kwargs):
         """ fit using poisson fitter  
@@ -79,37 +79,35 @@ class LightCurve(object):
         pdict=dict()
         for i,q in enumerate(self):
             try:
-#                 fmax = max(0, q.solve(fix_beta=True))
-#                 pf =poisson.PoissonFitter(q, fmax=fmax)
-                p = q.fit_poisson().poiss
+                p = PoissonRep(q) #.fit_poisson().poiss
 
                 pdict[i] = dict(t=q.t, flux=np.round(p.flux,4), exp=q.exp, 
                                 errors=np.abs(np.array(p.errors)-p.flux).round(3),
-                                limit=np.round(p.cdfinv(0.5),3), ts=np.round(p.ts,3), poiss=p ) 
+                                limit=np.round(p.limit), ts=np.round(p.ts,3), funct=p ) 
             except Exception as msg:
                 print(f'Fail for Index {i}, LogLike {q}\n   {msg}')
                 raise
         self.fit_df = pd.DataFrame.from_dict(pdict,orient='index', dtype=np.float32)  
         assume_rate=False
-        self.fitter='poiss'
+        self.representaion='poiss'
         if data.verbose>0:
             print(f'Fit {len(self)} intervals: columns (t, exp, flux, errors, limit, ts) in a DataFrame.')
                 
     def flux_plot(self,fix_beta=False, title=None, ax=None): 
-        if self.fitter is None:
+        if self.representation is None:
             self.fit(fix_beta)
 
         df=self.fit_df
+        rep = self.representation
         t = df.t
         y=  df.flux.values.clip(0,4)
-        if self.fitter=='poiss':
-            errors = df.errors.apply(lambda x: 0.5*(x[0]+x[1]))
-        elif self.fitter=='gauss':
-            errors = df.error
+        if rep=='poiss':
+            dy = [df.errors.apply(lambda x: x[i]).clip(0,4) for i in range(2)]
+        elif rep=='gauss':
+            dy = df.error.clip(0,4)
         else:
-            raise Exception(f'unrecognized fitter: {self.fitter}')
-        dy= errors.values.clip(0,4)
-        
+            raise Exception(f'unrecognized fitter: {rep}')
+
         if not ax:
             fig, ax = plt.subplots(figsize=(12,4))
         else:
@@ -129,8 +127,8 @@ class LightCurve(object):
         df = self.fit_df
         fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,2.5))
         x = df.t
-        y = df.rate
-        yerr = df.sigma
+        y = df.flux
+        yerr = df.error
 
         def shist(ax, x,  xlim, nbins, label, xlog=False): 
             def space(xlim, nbins=50):
@@ -301,4 +299,44 @@ class LogLike(object):
         ax.grid()
         ax.set(title=title, xlim=xlim, ylim=(f(a)-4, f(a)+0.2), 
                ylabel='log likelihood', xlabel=r'$\alpha$')
+
+class GaussionRep(object):
+    pass #TODO put stuff that assumes the simple gaussian representation
         
+class PoissonRep(object):
+    """Manage the representation of the log likelihood of a cell by a Poisson
+    Notes: function assumes arg is the rate
+            beta is set to zero
+    """
+    
+    def __init__(self, loglike):
+        """loglike: a LogLike object"""
+        
+        self.ll=loglike
+        global assume_rate
+        t, assume_rate = (assume_rate, True)
+        fmax=max(0, loglike.solve()[0])
+        self.pf = poisson.PoissonFitter(loglike, fmax=fmax)
+        self.poiss=self.pf.poiss
+        assume_rate=t
+        
+    def __call__(self, flux):
+        return self.poiss(flux)
+    
+    def __repr__(self):
+        t = np.array(self.errors)/self.flux-1
+        relerr = np.abs(np.array(self.errors)/self.flux-1)
+        return f'{self.__class__} flux: {self.flux:.3f}[1+{relerr[0]:.2f}-{relerr[1]:.2f}], ' \
+               f'limit: {self.limit:.2f}, ts: {self.ts:.1f}'
+    @property
+    def flux(self):
+        return self.poiss.flux
+    @property
+    def errors(self):
+        return self.poiss.errors
+    @property
+    def limit(self):
+        return self.poiss.cdfinv(0.05)
+    @property
+    def ts(self):
+        return self.poiss.ts
