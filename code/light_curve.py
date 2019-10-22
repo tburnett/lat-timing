@@ -8,9 +8,12 @@ import os, sys
 
 from scipy import (optimize, linalg)
 from scipy.linalg import (LinAlgError, LinAlgWarning)
-import keyword_options
+import keyword_options, poisson
 
 data=None # data_managment.Data obect for access to name, verbose, etc.
+
+# global to assume that likelihood is a fucmtion of 1+alpha, with beta fixed at 0
+assume_rate=False
 
 class LightCurve(object):
     """ In the language of Kerr, manage a set of cells
@@ -58,12 +61,34 @@ class LightCurve(object):
                 good.append(ll)
         fits = np.array(r)
         self.bad =bad # save list for later study
-        if data.verbose>0:
+        if data.verbose>2:
             print(f'Fits: {len(good)} good, {len(bad)} failed ')
         self.fit_df=  pd.DataFrame([[c.t for c in good],
                               [c.exp for c in good],fits[:,0], fits[:,1],ts],
                       index='time exp rate sigma ts'.split()).T
-        
+    def poiss_fit(self):
+        """ fit using poisson fitter        
+        """
+        # set global 
+        assume_rate=True
+        pdict=dict()
+        for i,q in enumerate(self):
+            try:
+                fmax = max(0, q.solve(fix_beta=True))
+                pf =poisson.PoissonFitter(q, fmax=fmax)
+                p = pf.poiss
+
+                pdict[i] = dict(t=q.t, flux=np.round(p.flux,4), exp=q.exp, 
+                                errors=np.abs(np.array(p.errors)-p.flux).round(3),
+                                limit=np.round(p.cdfinv(0.5),3), ts=np.round(p.ts,3) ) 
+            except Exception as msg:
+                print(f'Fail for Index {i}, LogLike {q}\n   {msg}')
+                raise
+        self.fit_df = pd.DataFrame.from_dict(pdict,orient='index', dtype=np.float32)  
+        assume_rate=False
+        if data.verbose>0:
+            print(f'Fit {len(self)} intervals: columns (t, exp, flux, errors, limit, ts) in a DataFrame.')
+                
     def rate_plot(self,fix_beta=False, title=None, ax=None): 
         if not hasattr(self, 'fit_df'):
             self.fit(fix_beta)
@@ -118,36 +143,59 @@ class LogLike(object):
     """ implement Kerr Eqn 2 for a single interval, or cell"""
     
     def __init__(self, cell):
+        """ cell is a dict"""
         
         self.__dict__.update(cell)
         self.estimate= [0, 0]
         
+    def info(self):
+        """Perform fits, return a dict with cell info"""
+        pars = self.solve()
+        if pars is None:
+            if data.verbose>0:
+                print(f'Fail fit for {self}')
+            return None
+            #raise RuntimeError('Fit failure')
+        hess = self.hessian(pars)
+        var  = np.linalg.inv(hess)
+        err  = np.sqrt(var.diagonal())
+        corr = var[0,1]/(err[0]*err[1])
+        return dict(t=self.t, exp=self.exp, counts=len(self.w), alpha=pars[0], beta=pars[1], 
+                    sig_alpha=err[0], sig_beta=err[1],corr=corr)
+        
     def __call__(self, pars ):
-        """ evaluate the log likelihood """
+        """ evaluate the log likelihood 
 
-        alpha, beta= pars if len(pars)>1 else (pars[0], 0.)
-        loglike= np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
-
-        return loglike
+        """
+        pars = np.atleast_1d(pars)
+        if assume_rate:   alpha, beta = max(-1, pars[0]-1), 0
+        elif len(pars)>1:      alpha, beta = pars
+        else:                  alpha, beta= (pars[0], 0.)
+            
+        return np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
 
     def __repr__(self):
         return f'''{self.__class__}
-        time {self.t:.3f} exposure {self.exp:.2f} S {self.S:.0f}, B {self.B:.0f}
-        {len(self.w)} weights, mean {self.w.mean():.2f}, std {self.w.std():.2f}'''
+        time {self.t:.3f}, {len(self.w)} weights,  exposure {self.exp:.2f}, S {self.S:.0f}, B {self.B:.0f}'''
         
     def gradient(self, pars ):
-        """gradient of the log likelihood with respect to alpha and beta, or just alpha"""
-        w = self.w
+        """gradient of the log likelihood with respect to alpha and beta, or just alpha
+        """
+        w,S = self.w, self.S
+        pars = np.atleast_1d(pars)
+        if assume_rate:
+            alpha=pars[0]-1
+            return np.sum(w/(1+alpha*w)) - S
+        
         fixed_beta = len(pars)==1
-        if fixed_beta:
-            
+        if fixed_beta:            
             alpha =  pars[0] 
             D = 1 + alpha*w
-            return np.sum(w/D) - self.S
+            return np.sum(w/D) - S
         else:
             alpha, beta = pars
             D =  1 + alpha*w + beta*(1-w)
-            da = np.sum(w/D) - self.S
+            da = np.sum(w/D) - S
             db = np.sum((1-w)/D) - self.B
             return [da,db]  
         
@@ -156,9 +204,10 @@ class LogLike(object):
         Note this is also the Jacobian of the gradient.
         """
         w = self.w
+        pars = np.atleast_1d(pars)
         fixed_beta = len(pars)==1
         if fixed_beta:
-            alpha = pars[0]
+            alpha = pars[0] if not assume_rate else pars[0]-1
             D = 1 + alpha*w 
             return [np.sum((w/D)**2)]
         else:
@@ -171,7 +220,7 @@ class LogLike(object):
         """Return signal rate and its error"""
         #TODO: return upper limit if TS<?
         try:
-            s = self.solve(fix_beta)
+            s = self.solve(fix_beta or self.assume_rate)
             if s is None:
                 return None
             h = self.hessian(s)
@@ -198,7 +247,7 @@ class LogLike(object):
         """
         kw = dict(factor=2, xtol=1e-3, fprime=self.hessian)
         kw.update(**fit_kw)
-        estimate = self.estimate[0:1] if fix_beta else self.estimate
+        estimate = self.estimate[0:1] if fix_beta or assume_rate else self.estimate
         try:
             ret = optimize.fsolve(self.gradient, estimate , **kw)   
         except RuntimeWarning as msg:
