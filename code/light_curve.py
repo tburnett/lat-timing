@@ -83,7 +83,7 @@ class LightCurve(object):
 
                 pdict[i] = dict(t=q.t, flux=np.round(p.flux,4), exp=q.exp, 
                                 errors=np.abs(np.array(p.errors)-p.flux).round(3),
-                                limit=np.round(p.limit), ts=np.round(p.ts,3), funct=p ) 
+                                limit=np.round(p.limit, 3), ts=np.round(p.ts,3), funct=p ) 
             except Exception as msg:
                 print(f'Fail for Index {i}, LogLike {q}\n   {msg}')
                 raise
@@ -91,7 +91,7 @@ class LightCurve(object):
         assume_rate=False
         self.representaion='poiss'
         if data.verbose>0:
-            print(f'Fit {len(self)} intervals: columns (t, exp, flux, errors, limit, ts) in a DataFrame.')
+            print(f'Fit {len(self)} intervals: columns (t, exp, flux, errors, limit, ts, funct) in a DataFrame.')
                 
     def flux_plot(self,fix_beta=False, title=None, ax=None): 
         if self.representation is None:
@@ -336,7 +336,8 @@ class PoissonRep(object):
         return self.poiss.errors
     @property
     def limit(self):
-        return self.poiss.cdfinv(0.05)
+        """ 95% confidence interval"""
+        return self.poiss.cdfcinv(0.05)
     @property
     def ts(self):
         return self.poiss.ts
