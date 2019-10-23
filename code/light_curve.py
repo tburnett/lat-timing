@@ -12,140 +12,15 @@ import keyword_options, poisson
 
 data=None # data_managment.Data obect for access to name, verbose, etc.
 
-
-
-class LightCurve(object):
-    """ In the language of Kerr, manage a set of cells
-    """
-    defaults=(
-        ('min_exp', 0.3, 'mimimum exposure factor'),
-        ('rep',   'poiss', 'name of the likelihood representation: poiss, gauss, or gauss2d'),
-
-    )
-    @keyword_options.decorate(defaults)
-    def __init__(self, binned_weights, **kwargs):
-        """Load binned data
-        parameters:
-            binned_weights : an iterable object that is a list of dicts; expect each to have
-                 keys t, exp, w, S, B
-            min_exp : filter by exposure factor
-        """
-        keyword_options.process(self,kwargs)
-        global data
-        data=binned_weights.data
-        self.cells = [LogLike(ml) for ml in binned_weights if ml['exp']>self.min_exp] 
-        if data.verbose>0:
-            print(f'Loaded {len(self)} / {len(binned_weights)} cells with exposure > {self.min_exp} for light curve analysis')
-        self.representation = None
-         
-    def __repr__(self):
-        return f'{self.__class__} {len(self.cells)} cells loaded'
-    
-    def __getitem__(self, i):
-        return self.cells[i]
-    
-    def __len__(self):
-        return len(self.cells)
-    
-    def fit(self, **kwargs):
-        """Perform fits to all intervals assuming likelihood are normally distributed,
-                set a DataFrame with results
-        """
-        outd = dict()
-        if self.rep=='gauss':
-            
-            r=[]; bad=[]; good=[]; ts=[]
-            for i,cell in enumerate(self):
-
-                outd[i] = cell.info(fix_beta=True)
-
-            self.fit_df=  pd.DataFrame.from_dict(outd, orient='index', dtype=np.float32)
-
-        elif self.rep=='poiss':
-            self.poiss_fit(**kwargs)
-        else:
-            assert False
-
-    def poiss_fit(self, **kwargs):
-        """ fit using poisson fitter  
-        
-        """
-        pdict=dict()
-        for i,q in enumerate(self):
-            try:
-                p = PoissonRep(q) #.fit_poisson().poiss
-
-                pdict[i] = dict(t=q.t, flux=np.round(p.flux,4), exp=q.exp, 
-                                errors=np.abs(np.array(p.errors)-p.flux).round(3),
-                                limit=np.round(p.limit, 3), ts=np.round(p.ts,3), funct=p ) 
-            except Exception as msg:
-                print(f'Fail for Index {i}, LogLike {q}\n   {msg}')
-                raise
-        self.fit_df = pd.DataFrame.from_dict(pdict,orient='index', dtype=np.float32)  
-        if data.verbose>0:
-            print(f'Fit {len(self)} intervals: columns (t, exp, flux, errors, limit, ts, funct) in a DataFrame.')
-                
-    def flux_plot(self, title=None, ax=None): 
-
-        df=self.fit_df
-        t = df.t
-        y=  df.flux.values.clip(0,4)
-        if self.rep=='poiss':
-            dy = [df.errors.apply(lambda x: x[i]).clip(0,4) for i in range(2)]
-        elif self.rep=='gauss':
-            dy = df.sig_flux.clip(0,4)
-        else:
-            raise Exception(f'unrecognized fitter: {rep}')
-
-        if not ax:
-            fig, ax = plt.subplots(figsize=(12,4))
-        else:
-            fig =ax.figure
-        ax.errorbar(x=t, y=y, yerr=dy, fmt='+')
-        ax.axhline(1., color='grey')
-        ax.set(xlabel='MJD', ylabel='relative rate')
-        ax.set_title(title or data.source_name)
-        ax.grid(alpha=0.5)
-        
-    def fit_hists(self, title=None, **hist_kw):
-        """ Generate set of histograms of rate, error, pull, and maybe TS
-        """
-        hkw = dict(log=True, histtype='stepfilled',lw=2, edgecolor='blue', facecolor='lightblue')
-        hkw.update(hist_kw)
-
-        df = self.fit_df
-        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,2.5))
-        x = df.t
-        y = df.flux
-        yerr = df.sig_flux
-
-        def shist(ax, x,  xlim, nbins, label, xlog=False): 
-            def space(xlim, nbins=50):
-                if xlog:
-                    return np.logspace(np.log10(xlim[0]), np.log10(xlim[1]))
-                return np.linspace(xlim[0], xlim[1], nbins+1)
-            info = f'mean {x.mean():6.3f}\nstd  {x.std():6.3f}'
-            ax.hist(x.clip(*xlim), bins=space(xlim, nbins), **hkw)
-            ax.set(xlabel=label, xscale='log' if xlog else 'linear', ylim=(0.8,None))
-            ax.text(0.65, 0.84, info, transform=ax.transAxes,fontdict=dict(size=10, family='monospace')) 
-            ax.grid(alpha=0.5)
-            return ax
-
-        shist(ax1, y, (0.2, 5), 25, 'relative rate', xlog=True).axvline(1, color='grey')
-        shist(ax2, yerr, (1e-2, 0.3), 25, 'sigma', xlog=True)
-        shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
-        fig.suptitle(title or data.source_name+' fit summary')
     
 class LogLike(object):
     """ implement Kerr Eqn 2 for a single interval, or cell"""
     
     def __init__(self, cell):
-        """ cell is a dict"""
-        
+        """ cell is a dict"""       
         self.__dict__.update(cell)
-        self.estimate= [0.5, 0]
         
-    def info(self, fix_beta=True):
+    def fit_info(self, fix_beta=True):
         """Perform fits, return a dict with cell info"""
         pars = self.solve(fix_beta)
         if pars is None:
@@ -179,8 +54,8 @@ class LogLike(object):
         return np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
 
     def __repr__(self):
-        return f'''{self.__class__}
-        time {self.t:.3f}, {len(self.w)} weights,  exposure {self.exp:.2f}, S {self.S:.0f}, B {self.B:.0f}'''
+        return f'{self.__class__.__module__}.{self.__class__.__name__}:'\
+        f' time {self.t:.3f}, {len(self.w)} weights,  exposure {self.exp:.2f}, S {self.S:.0f}, B {self.B:.0f}'
         
 
     def gradient(self, pars ):
@@ -235,14 +110,14 @@ class LogLike(object):
             print(f'exception: {msg}')
         print(9999.)
             
-    def minimize(self,   fix_beta=True, **fmin_kw):
+    def minimize(self,   fix_beta=True,estimate=[0.5,0], **fmin_kw):
         """Minimize the -Log likelihood """
         kw = dict(disp=False)
         kw.update(**fmin_kw)
         f = lambda pars: -self(pars)
-        return optimize.fmin_cg(f, self.estimate[0:1] if fix_beta else self.estimate, **kw)
+        return optimize.fmin_cg(f, estimate[0:1] if fix_beta else estimate, **kw)
 
-    def solve(self, fix_beta=True, debug=False, estimate=[0.5,1],**fit_kw):
+    def solve(self, fix_beta=True, debug=False, estimate=[0.5,0],**fit_kw):
         """Solve non-linear equation(s) from setting gradient to zero 
         note that the hessian is a jacobian
         """
@@ -281,22 +156,46 @@ class LogLike(object):
                ylabel='log likelihood', xlabel='flux')
 
 
-class GaussionRep(object):
-    pass #TODO put stuff that assumes the simple gaussian representation
+class GaussianRep(object):
+    """ Manage fits to the loglike object
+    """
+    
+    def __init__(self, loglike, fix_beta=True):
+        """1- or 2-D fits to LogLike"""
+        self.fix_beta = fix_beta
+        self.fit = loglike.fit_info(fix_beta)        
+        
+    def __call__(self, pars):
+        return None # TODO if needed
+
+    def __repr__(self):
+        return f'{self.__class__.__module__}.{self.__class__.__name__}: {self.fit}'
+        
+class Gaussian2dRep(GaussianRep):
+    def __init__(self, loglike):
+        super(Gaussian2dRep, self).__init__(loglike, fix_beta=False)
+    
         
 class PoissonRep(object):
     """Manage the representation of the log likelihood of a cell by a Poisson
     Notes: function assumes arg is the rate
-            beta is set to zero
+            beta is set to zero (for now)
     """
     
     def __init__(self, loglike):
         """loglike: a LogLike object"""
         
-        self.ll=loglike
+        #self.ll=loglike
         fmax=max(0, loglike.solve()[0])
         self.pf = poisson.PoissonFitter(loglike, fmax=fmax)
         self.poiss=self.pf.poiss
+        p = self
+        self.fit= dict(t=loglike.t, exp=loglike.exp, 
+                       flux=np.round(p.flux,4), 
+                       errors=np.abs(np.array(p.errors)-p.flux).round(3),
+                       limit=np.round(p.limit, 3), 
+                       ts=np.round(p.ts,3), 
+                       funct=p ) 
 
     def __call__(self, flux):
         return self.poiss(flux)
@@ -304,7 +203,7 @@ class PoissonRep(object):
     def __repr__(self):
         t = np.array(self.errors)/self.flux-1
         relerr = np.abs(np.array(self.errors)/self.flux-1)
-        return f'{self.__class__} flux: {self.flux:.3f}[1+{relerr[0]:.2f}-{relerr[1]:.2f}], ' \
+        return f'{self.__class__.__module__}.{self.__class__.__name__}: flux: {self.flux:.3f}[1+{relerr[0]:.2f}-{relerr[1]:.2f}], ' \
                f'limit: {self.limit:.2f}, ts: {self.ts:.1f}'
     @property
     def flux(self):
@@ -319,3 +218,109 @@ class PoissonRep(object):
     @property
     def ts(self):
         return self.poiss.ts
+    
+class LightCurve(object):
+    """ In the language of Kerr, manage a set of cells
+    """
+    defaults=(
+        ('min_exp', 0.3, 'mimimum exposure factor'),
+        ('rep',   'poisson', 'name of the likelihood representation: poiss, gauss, or gauss2d'),
+        ('replist', 'gauss gauss2d poisson'.split(), 'Possible reps'),
+        ('rep_class', [GaussianRep, Gaussian2dRep, PoissonRep], 'coresponding classes')
+
+    )
+    @keyword_options.decorate(defaults)
+    def __init__(self, binned_weights, **kwargs):
+        """Load binned data
+        parameters:
+            binned_weights : an iterable object that is a list of dicts; expect each to have
+                 keys t, exp, w, S, B
+            min_exp : filter by exposure factor
+        """
+        keyword_options.process(self,kwargs)
+        global data
+        data=binned_weights.data
+        self.cells = [LogLike(ml) for ml in binned_weights if ml['exp']>self.min_exp] 
+        if data.verbose>0:
+            print(f'Loaded {len(self)} / {len(binned_weights)} cells with exposure > {self.min_exp} for light curve analysis')
+        
+        if self.rep not in self.replist:
+            raise Exception(f'Unrecognized rep: "{self.rep}", must be one of {self.reps}')
+        repcl = self.rep_class[self.replist.index(self.rep)]
+        self.fit_df = self.fit(repcl)
+         
+    def __repr__(self):
+        return f'{self.__class__} {len(self.cells)} cells fit with rep {self.rep}'
+    
+    def __getitem__(self, i):
+        return self.cells[i]
+    
+    def __len__(self):
+        return len(self.cells)
+    
+    def fit(self, repcl):
+        """Perform fits to all intervals with chosen log likelihood representataon
+        """
+        outd = dict()
+        for i, cell in enumerate(self):
+            try:
+                outd[i]=repcl(cell).fit
+            except Exception as msg:
+                print(f'{repcl} fail for Index {i}, LogLike {cell}\n   {msg}')
+                raise
+
+        df = pd.DataFrame.from_dict(outd, orient='index', dtype=np.float32)
+        if data.verbose>0:
+            print(f'Fits using representation {self.rep}: {len(self)} intervals\n  columns: {list(df.columns)} ')
+        return df 
+
+    def flux_plot(self, title=None, ax=None): 
+
+        df=self.fit_df
+        t = df.t
+        y=  df.flux.values.clip(0,4)
+        if self.rep=='poisson':
+            dy = [df.errors.apply(lambda x: x[i]).clip(0,4) for i in range(2)]
+        elif self.rep=='gauss' or self.rep=='gauss2d':
+            dy = df.sig_flux.clip(0,4)
+        else: assert False
+
+        fig, ax = plt.subplots(figsize=(12,4)) if ax is None else (ax.figure, ax)
+        ax.errorbar(x=t, y=y, yerr=dy, fmt='+')
+        ax.axhline(1., color='grey')
+        ax.set(xlabel='MJD', ylabel='relative flux')
+        ax.set_title(title or f'{data.source_name}, rep {self.rep}')
+        ax.grid(alpha=0.5)
+        
+    def fit_hists(self, title=None, **hist_kw):
+        """ Generate set of histograms of rate, error, pull, and maybe TS
+        """
+        hkw = dict(log=True, histtype='stepfilled',lw=2, edgecolor='blue', facecolor='lightblue')
+        hkw.update(hist_kw)
+
+        df = self.fit_df
+        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,2.5))
+        x = df.t
+        y = df.flux
+        if self.rep=='poisson': #mean of high, low 
+            yerr = df.errors.apply(lambda x: (x[0]+x[1])/2).clip(0,4) 
+        elif self.rep=='gauss' or self.rep=='gauss2d':
+            yerr = df.sig_flux.clip(0,4)
+        else: assert False
+
+        def shist(ax, x,  xlim, nbins, label, xlog=False): 
+            def space(xlim, nbins=50):
+                if xlog:
+                    return np.logspace(np.log10(xlim[0]), np.log10(xlim[1]))
+                return np.linspace(xlim[0], xlim[1], nbins+1)
+            info = f'mean {x.mean():6.3f}\nstd  {x.std():6.3f}'
+            ax.hist(x.clip(*xlim), bins=space(xlim, nbins), **hkw)
+            ax.set(xlabel=label, xscale='log' if xlog else 'linear', ylim=(0.8,None))
+            ax.text(0.65, 0.84, info, transform=ax.transAxes,fontdict=dict(size=10, family='monospace')) 
+            ax.grid(alpha=0.5)
+            return ax
+
+        shist(ax1, y, (0.2, 5), 25, 'relative flux', xlog=True).axvline(1, color='grey')
+        shist(ax2, yerr, (1e-2, 0.3), 25, 'sigma', xlog=True)
+        shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
+        fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
