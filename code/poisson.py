@@ -16,7 +16,7 @@ class Poisson(object):
         e  : normalization factor to convert flux to equivalent counts. must be >0
         b  : background flux: must be >=0
         
-        This parametrization used is equivalent to that described in William
+        This parameterization is equivalent to that described in William
         Tompkins' thesis (arxiv: astro-ph/0202141) and Nolan, et al., 2003,
         ApJ 597:615:627. The functional form is that of a Poisson distribution
 
