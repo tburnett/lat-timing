@@ -12,15 +12,15 @@ import keyword_options, poisson
 
 data=None # data_managment.Data obect for access to name, verbose, etc.
 
-# global to assume that likelihood is a fucmtion of 1+alpha, with beta fixed at 0
-assume_rate=False
+
 
 class LightCurve(object):
     """ In the language of Kerr, manage a set of cells
     """
     defaults=(
         ('min_exp', 0.3, 'mimimum exposure factor'),
-        ('fitter', None, 'name of the likelihood fitter: poiss or gauss')
+        ('rep',   'poiss', 'name of the likelihood representation: poiss, gauss, or gauss2d'),
+
     )
     @keyword_options.decorate(defaults)
     def __init__(self, binned_weights, **kwargs):
@@ -47,35 +47,29 @@ class LightCurve(object):
     def __len__(self):
         return len(self.cells)
     
-    def fit(self, fix_beta=True, no_ts=True):
+    def fit(self, **kwargs):
         """Perform fits to all intervals assuming likelihood are normally distributed,
                 set a DataFrame with results
         """
-        r=[]; bad=[]; good=[]; ts=[]
-        for ll in self:
-            result = ll.rate(fix_beta=fix_beta, no_ts=no_ts)
-            if result is None: 
-                bad.append(ll)
-            else:
-                s, sig, t = result
-                r.append([s, sig])
-                ts.append(t)
-                good.append(ll)
-        fits = np.array(r)
-        self.bad =bad # save list for later study
-        if data.verbose>2:
-            print(f'Fits: {len(good)} good, {len(bad)} failed ')
-        self.fit_df=  pd.DataFrame([[c.t for c in good],
-                              [c.exp for c in good],fits[:,0], fits[:,1],ts],
-                      index='t exp flux error ts'.split()).T
-        self.representation='gauss'
-        
+        outd = dict()
+        if self.rep=='gauss':
+            
+            r=[]; bad=[]; good=[]; ts=[]
+            for i,cell in enumerate(self):
+
+                outd[i] = cell.info(fix_beta=True)
+
+            self.fit_df=  pd.DataFrame.from_dict(outd, orient='index', dtype=np.float32)
+
+        elif self.rep=='poiss':
+            self.poiss_fit(**kwargs)
+        else:
+            assert False
+
     def poiss_fit(self, **kwargs):
         """ fit using poisson fitter  
         
         """
-        # set global 
-        assume_rate=True
         pdict=dict()
         for i,q in enumerate(self):
             try:
@@ -88,23 +82,18 @@ class LightCurve(object):
                 print(f'Fail for Index {i}, LogLike {q}\n   {msg}')
                 raise
         self.fit_df = pd.DataFrame.from_dict(pdict,orient='index', dtype=np.float32)  
-        assume_rate=False
-        self.representaion='poiss'
         if data.verbose>0:
             print(f'Fit {len(self)} intervals: columns (t, exp, flux, errors, limit, ts, funct) in a DataFrame.')
                 
-    def flux_plot(self,fix_beta=False, title=None, ax=None): 
-        if self.representation is None:
-            self.fit(fix_beta)
+    def flux_plot(self, title=None, ax=None): 
 
         df=self.fit_df
-        rep = self.representation
         t = df.t
         y=  df.flux.values.clip(0,4)
-        if rep=='poiss':
+        if self.rep=='poiss':
             dy = [df.errors.apply(lambda x: x[i]).clip(0,4) for i in range(2)]
-        elif rep=='gauss':
-            dy = df.error.clip(0,4)
+        elif self.rep=='gauss':
+            dy = df.sig_flux.clip(0,4)
         else:
             raise Exception(f'unrecognized fitter: {rep}')
 
@@ -128,7 +117,7 @@ class LightCurve(object):
         fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,2.5))
         x = df.t
         y = df.flux
-        yerr = df.error
+        yerr = df.sig_flux
 
         def shist(ax, x,  xlim, nbins, label, xlog=False): 
             def space(xlim, nbins=50):
@@ -147,8 +136,6 @@ class LightCurve(object):
         shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
         fig.suptitle(title or data.source_name+' fit summary')
     
-"""Implement maximizaion of weighted log likeliood
-"""
 class LogLike(object):
     """ implement Kerr Eqn 2 for a single interval, or cell"""
     
@@ -156,31 +143,38 @@ class LogLike(object):
         """ cell is a dict"""
         
         self.__dict__.update(cell)
-        self.estimate= [0, 0]
+        self.estimate= [0.5, 0]
         
-    def info(self):
+    def info(self, fix_beta=True):
         """Perform fits, return a dict with cell info"""
-        pars = self.solve()
+        pars = self.solve(fix_beta)
         if pars is None:
             if data.verbose>0:
                 print(f'Fail fit for {self}')
             return None
             #raise RuntimeError('Fit failure')
         hess = self.hessian(pars)
-        var  = np.linalg.inv(hess)
-        err  = np.sqrt(var.diagonal())
-        corr = var[0,1]/(err[0]*err[1])
-        return dict(t=self.t, exp=self.exp, counts=len(self.w), alpha=pars[0], beta=pars[1], 
-                    sig_alpha=err[0], sig_beta=err[1],corr=corr)
+        outdict = dict(t=self.t, exp=self.exp, counts=len(self.w) )
+        if len(pars)==1:
+            outdict.update(flux=pars[0], sig_flux=np.sqrt(1/hess[0]))
+        else:
+            beta = pars[1]
+            var  = np.linalg.inv(hess)
+            err  = np.sqrt(var.diagonal())
+            sig_flux=err[0]
+            sig_beta=err[1]
+            corr = var[0,1]/(err[0]*err[1])
+            outdict.update(flux=pars[0], beta=beta, 
+                        sig_flux=sig_flux, sig_beta=sig_beta,corr=corr)
+        return outdict
         
     def __call__(self, pars ):
         """ evaluate the log likelihood 
 
         """
         pars = np.atleast_1d(pars)
-        if assume_rate:   alpha, beta = max(-1, pars[0]-1), 0
-        elif len(pars)>1:      alpha, beta = pars
-        else:                  alpha, beta= (pars[0], 0.)
+        if len(pars)>1:      alpha, beta = pars
+        else:                alpha, beta = max(-1, pars[0]-1), 0
             
         return np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
 
@@ -188,32 +182,19 @@ class LogLike(object):
         return f'''{self.__class__}
         time {self.t:.3f}, {len(self.w)} weights,  exposure {self.exp:.2f}, S {self.S:.0f}, B {self.B:.0f}'''
         
-    def fit_poisson(self):
-        """ return a Poisson representation of this function (assuming flux)
-        """
-        global assume_rate
-        t = assume_rate; assume_rate=True
-        fmax=max(0, self.solve()[0])
-        ret = poisson.PoissonFitter(self, fmax=fmax)
-        assume_rate=t
-        return ret
 
     def gradient(self, pars ):
-        """gradient of the log likelihood with respect to alpha and beta, or just alpha
+        """gradient of the log likelihood with respect to alpha=flux-1 and beta, or just alpha
         """
         w,S = self.w, self.S
         pars = np.atleast_1d(pars)
-        if assume_rate:
-            alpha=pars[0]-1
-            return np.sum(w/(1+alpha*w)) - S
-        
-        fixed_beta = len(pars)==1
-        if fixed_beta:            
-            alpha =  pars[0] 
+  
+        alpha =  max(-1,pars[0] -1)        
+        if len(pars)==1:           
             D = 1 + alpha*w
             return np.sum(w/D) - S
         else:
-            alpha, beta = pars
+            beta = pars[1]
             D =  1 + alpha*w + beta*(1-w)
             da = np.sum(w/D) - S
             db = np.sum((1-w)/D) - self.B
@@ -225,70 +206,69 @@ class LogLike(object):
         """
         w = self.w
         pars = np.atleast_1d(pars)
-        fixed_beta = len(pars)==1
-        if fixed_beta:
-            alpha = pars[0] if not assume_rate else pars[0]-1
+        alpha = max(-1, pars[0]-1)
+        if  len(pars)==1:
             D = 1 + alpha*w 
             return [np.sum((w/D)**2)]
         else:
-            alpha, beta= pars
+            beta= pars[1]
             Dsq = (1 + alpha*w + beta*(1-w))**2
             a, b, c = np.sum(w**2/Dsq), np.sum(w*(1-w)/Dsq), np.sum((1-w)**2/Dsq)
             return np.array([[a,b], [b,c]])
         
-    def rate(self, fix_beta=False, debug=False, no_ts=True):
+    def rate(self, fix_beta=True, debug=False, no_ts=True):
         """Return signal rate and its error"""
-        #TODO: return upper limit if TS<?
         try:
-            s = self.solve(fix_beta or assume_rate)
+            s = self.solve(fix_beta )
             if s is None:
                 return None
             h = self.hessian(s)
         
             v = 1./h[0] if fix_beta else linalg.inv(h)[0,0]
             ts = None if no_ts else (0 if s[0]<=-1 else 2*(self(s)-self([-1,s[1]])))
-            return (1+s[0]), np.sqrt(v), ts
+            return (s[0]), np.sqrt(v), ts
         
         except (LinAlgError, LinAlgWarning, RuntimeWarning) as msg:
             if debug or data.verbose>2:
                 print(f'Fit error, cell {self},\n\t{msg}')
-            return None
+        except Exception as msg:
+            print(f'exception: {msg}')
+        print(9999.)
             
-    def minimize(self,   fix_beta=False, **fmin_kw):
+    def minimize(self,   fix_beta=True, **fmin_kw):
         """Minimize the -Log likelihood """
         kw = dict(disp=False)
         kw.update(**fmin_kw)
         f = lambda pars: -self(pars)
         return optimize.fmin_cg(f, self.estimate[0:1] if fix_beta else self.estimate, **kw)
 
-    def solve(self, fix_beta=False, debug=False, **fit_kw):
+    def solve(self, fix_beta=True, debug=False, estimate=[0.5,1],**fit_kw):
         """Solve non-linear equation(s) from setting gradient to zero 
         note that the hessian is a jacobian
         """
         kw = dict(factor=2, xtol=1e-3, fprime=self.hessian)
         kw.update(**fit_kw)
-        estimate = self.estimate[0:1] if fix_beta or assume_rate else self.estimate
+
         try:
-            ret = optimize.fsolve(self.gradient, estimate , **kw)   
+            ret = optimize.fsolve(self.gradient, estimate[0] if fix_beta else estimate , **kw)   
         except RuntimeWarning as msg:
             if debug or data.verbose>2:
                 print(f'Runtime fsolve warning for cell {self}, \n\t {msg}')
             return None
         return np.array(ret)
         
-    def loglikeplot(ll,fix_beta=False, xlim=(-0.2,0.2),ax=None, title=None):
-        if ax is None:
-            fig, ax = plt.subplots(figsize=(4,2))
-        else: fig=ax.figure
+    def plot(self, fix_beta=True, xlim=(0,1.2),ax=None, title=None):
+        fig, ax = plt.subplots(figsize=(4,2)) if ax is None else (ax.figure, ax)
+
         dom = np.linspace(*xlim)
-        v, s, ts = ll.rate(fix_beta=fix_beta, debug=True)
+        a, s, ts = self.rate(fix_beta=fix_beta, debug=True)
         if fix_beta:
-            f = lambda x: ll([x])
-            a, beta = v-1, 0.
+            f = lambda x: self([x])
+            beta=0
         else:
-            a, beta = ll.solve(fix_beta, debug=True)
-            assert abs(a-v+1)<1e-6, f'{a},{v}, {a-v+1}'
-            f = lambda x: ll([x, beta])
+            a, beta = self.solve(fix_beta, debug=True)
+            #assert abs(a-v+1)<1e-6, f'{a},{v}, {a-v+1}'
+            f = lambda x: self([x, beta])
         ax.plot(dom, list(map(f,dom)) )
 
         ax.plot(a, f(a), 'or')
@@ -298,7 +278,8 @@ class LogLike(object):
         ax.plot(a, f(a)-0.5, '-ok', ms=10)
         ax.grid()
         ax.set(title=title, xlim=xlim, ylim=(f(a)-4, f(a)+0.2), 
-               ylabel='log likelihood', xlabel=r'$\alpha$')
+               ylabel='log likelihood', xlabel='flux')
+
 
 class GaussionRep(object):
     pass #TODO put stuff that assumes the simple gaussian representation
@@ -313,13 +294,10 @@ class PoissonRep(object):
         """loglike: a LogLike object"""
         
         self.ll=loglike
-        global assume_rate
-        t, assume_rate = (assume_rate, True)
         fmax=max(0, loglike.solve()[0])
         self.pf = poisson.PoissonFitter(loglike, fmax=fmax)
         self.poiss=self.pf.poiss
-        assume_rate=t
-        
+
     def __call__(self, flux):
         return self.poiss(flux)
     
