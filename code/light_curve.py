@@ -123,7 +123,9 @@ class LogLike(object):
         """
         kw = dict(factor=2, xtol=1e-3, fprime=self.hessian)
         kw.update(**fit_kw)
-
+        if fix_beta and self.gradient([0])<0:
+            # can happen if solution is negatives
+            return [0]
         try:
             ret = optimize.fsolve(self.gradient, estimate[0] if fix_beta else estimate , **kw)   
         except RuntimeWarning as msg:
@@ -185,9 +187,10 @@ class PoissonRep(object):
     def __init__(self, loglike):
         """loglike: a LogLike object"""
         
-        #self.ll=loglike
         fmax=max(0, loglike.solve()[0])
-        self.pf = poisson.PoissonFitter(loglike, fmax=fmax)
+        ## NB: the dd=-10 is a kluge for very small limits, set for loglike stuff with different scales.
+        # this seems to work, but must be looked at more carefully
+        self.pf = poisson.PoissonFitter(loglike, fmax=fmax, dd=-10.)
         self.poiss=self.pf.poiss
         p = self
         self.fit= dict(t=loglike.t, exp=loglike.exp, 
@@ -201,8 +204,7 @@ class PoissonRep(object):
         return self.poiss(flux)
     
     def __repr__(self):
-        t = np.array(self.errors)/self.flux-1
-        relerr = np.abs(np.array(self.errors)/self.flux-1)
+        relerr = np.abs(np.array(self.errors)/self.flux-1) if self.flux>0 else [0,0]
         return f'{self.__class__.__module__}.{self.__class__.__name__}: flux: {self.flux:.3f}[1+{relerr[0]:.2f}-{relerr[1]:.2f}], ' \
                f'limit: {self.limit:.2f}, ts: {self.ts:.1f}'
     @property
@@ -226,7 +228,8 @@ class LightCurve(object):
         ('min_exp', 0.3, 'mimimum exposure factor'),
         ('rep',   'poisson', 'name of the likelihood representation: poiss, gauss, or gauss2d'),
         ('replist', 'gauss gauss2d poisson'.split(), 'Possible reps'),
-        ('rep_class', [GaussianRep, Gaussian2dRep, PoissonRep], 'coresponding classes')
+        ('rep_class', [GaussianRep, Gaussian2dRep, PoissonRep], 'coresponding classes'),
+        ('no_fit')
 
     )
     @keyword_options.decorate(defaults)
@@ -247,7 +250,10 @@ class LightCurve(object):
         if self.rep not in self.replist:
             raise Exception(f'Unrecognized rep: "{self.rep}", must be one of {self.reps}')
         repcl = self.rep_class[self.replist.index(self.rep)]
-        self.fit_df = self.fit(repcl)
+        try:
+            self.fit_df = self.fit(repcl)
+        except Exception as msg:
+            print(f'Fail fit: {msg}')
          
     def __repr__(self):
         return f'{self.__class__} {len(self.cells)} cells fit with rep {self.rep}'
@@ -274,21 +280,44 @@ class LightCurve(object):
             print(f'Fits using representation {self.rep}: {len(self)} intervals\n  columns: {list(df.columns)} ')
         return df 
 
-    def flux_plot(self, title=None, ax=None): 
-
+    def flux_plot(self, ts_max=9, xerr=0.5, title=None, ax=None, **kwargs): 
+        """Make a plot of flux with according to the representation
+        """
+        kw=dict(yscale='linear',xlabel='MJD', ylabel='relative flux',)
+        kw.update(**kwargs)
         df=self.fit_df
-        t = df.t
-        y=  df.flux.values.clip(0,4)
         if self.rep=='poisson':
-            dy = [df.errors.apply(lambda x: x[i]).clip(0,4) for i in range(2)]
-        elif self.rep=='gauss' or self.rep=='gauss2d':
-            dy = df.sig_flux.clip(0,4)
-        else: assert False
-
+            ts = df.ts
+            limit = ts<ts_max
+            bar = df.loc[~limit,:]
+            lim = df.loc[limit,:]
+        else: 
+            bar=df; lim=[]
+        
         fig, ax = plt.subplots(figsize=(12,4)) if ax is None else (ax.figure, ax)
-        ax.errorbar(x=t, y=y, yerr=dy, fmt='+')
-        ax.axhline(1., color='grey')
-        ax.set(xlabel='MJD', ylabel='relative flux')
+        
+        # the points with error bars
+        t = bar.t
+        y =  bar.flux.values
+        if self.rep=='poisson':
+            dy = [bar.errors.apply(lambda x: x[i]).clip(0,4) for i in range(2)]
+        elif self.rep=='gauss' or self.rep=='gauss2d':
+            dy = bar.sig_flux.clip(0,4)
+        else: assert False     
+        ax.errorbar(x=t, y=y, xerr=xerr, yerr=dy, fmt='+')
+        
+        # now do the limits
+        if len(lim)>0:
+            t = lim.t
+            y = lim.limit.values
+            yerr=0.2*(1 if kw['yscale']=='linear' else y)
+            ax.errorbar(x=t, y=y, xerr=xerr,
+                    yerr=yerr,  color='C1', 
+                    uplims=True, ls='', lw=1, capsize=4,  capthick=0,
+                    alpha=0.5)
+        
+        #ax.axhline(1., color='grey')
+        ax.set(**kw)
         ax.set_title(title or f'{data.source_name}, rep {self.rep}')
         ax.grid(alpha=0.5)
         
