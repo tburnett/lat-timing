@@ -67,45 +67,60 @@ class Data(object):
         self.exposure =  self._process_ft2(ft2_files,self.gti)
         photon_data = self._process_data(data_files, self.gti)
 
-        self.photon_data =self._check_photons(self.exposure, photon_data)
+        # set up DataFrame with all photons, and default binning
+        self.photon_data =self._check_photons(self.exposure, photon_data)      
+        self.time_bins = self._default_bins()
+        self.binned_exposure = self.get_binned_exposure(self.time_bins)
+
+    def _default_bins(self):
+        #set up default bins from exposure; adjust stop to come out even
+        # round to whole day
+
+        start = np.round(self.exposure.start.values[0])
+        stop =  np.round(self.exposure.stop.values[-1])
+        if self.mjd_range is None:
+            self.mjd_range = (start,stop)
+        step = self.interval
+        nbins = int(round((stop-start)/step))
+        time_bins = np.linspace(start, stop, nbins+1)
+        if self.verbose>0:
+            print(f'Default binning: {nbins} intervals of {step} days, '\
+                  f'in range ({time_bins[0]:.1f}, {time_bins[-1]:.1f})')
+        return time_bins 
 
 
-    def binner(self, step=None, start=None, stop=None,):
-        """Basic binner returns binned exposure and bin definition for histograms 
+    # def binner(self, step=None, start=None, stop=None,):
+    #     """Basic binner returns binned exposure and bin definition for histograms 
 
-        parameters:
-            step : bin size, default self.interval
-            start, stop: optional: default to ends
+    #     parameters:
+    #         step : bin size, default self.interval
+    #         start, stop: optional: default to ends
 
-        return: a tuple
-            time_bins , binned_exposure
-        """
+    #     return: a tuple
+    #         time_bins , binned_exposure
+    #     """
         
+
+        
+
+        
+        # return time_bins, self.get_binned_exposure(time_bins)
+
+    def get_binned_exposure(self, time_bins):
+
         # get stuff from photon data, exposure calculation
         exp   = self.exposure.exposure.values
         estart= self.exposure.start.values
         estop = self.exposure.stop.values
-
-        #set up bins from args or use defaults; adjust stop to come out even
-        # note round to whole day
-        step = step or self.interval
-        start = np.round(start or estart[0])
-        stop =  np.round(stop  or estop[-1])
-        nbins = int(round((stop-start)/step))
-        time_bins = np.linspace(start, start+nbins*step, nbins+1)
-        
-        if self.verbose>0:
-            print(f'Binning: {nbins} intervals of {step or self.interval} days from {time_bins[0]:.2f} to {time_bins[-1]:.2f}')
         
         #use cumulative exposure to integrate over larger periods
         cumexp = np.concatenate(([0],np.cumsum(exp)) )
 
         # get index into tstop array of the bin edges
         edge_index = np.searchsorted(estop, time_bins)
-        # now the exposure integrated over the intervals
-        binned_exposure = np.diff(cumexp[edge_index])
-
-        return time_bins, binned_exposure
+        # return the exposure integrated over the intervals
+        return np.diff(cumexp[edge_index])
+        
 
             
     def add_weights(self, filename):

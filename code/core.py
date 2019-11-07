@@ -531,7 +531,9 @@ class CellLogLikelihood(object):
         return brentq(f,b0,bmax,xtol=1e-3)+1
 
     def get_logpdf(self,aopt=None,dlogl=20,npt=100,include_zero=False,
-            profile_background=False):
+            profile_background=False, 
+             recursion_threshold=0.10, # THB added
+             ):
         """ Evaluate the pdf over an adaptive range that includes the
             majority of the support.  Try to keep it to about 100 iters.
         """
@@ -596,7 +598,11 @@ class CellLogLikelihood(object):
         # do a sanity check here
         acodmax = np.argmax(cod)
         codmax = cod[acodmax]
-        if abs(codmax - llmax) > 0.05:
+        test = abs(codmax - llmax) 
+        if test > recursion_threshold: #THB 0.05:
+            print( f'{abs(codmax-llmax):.3f}', end=',')
+            if test>10: 
+                raise RuntimeError( f'{abs(codmax - llmax):.3f}' )
             aopt = dom[acodmax]
             return self.get_logpdf(aopt=aopt,dlogl=dlogl,npt=npt,
                     include_zero=include_zero)
@@ -745,6 +751,7 @@ class CellsLogLikelihood(object):
         self.cells = cells
 
         for icll,cll in enumerate(self.clls):
+
             self._dom[icll],self._cod[icll] = cll.get_logpdf(
                     npt=npt,dlogl=30,profile_background=profile_background)
         self.profile_background = profile_background

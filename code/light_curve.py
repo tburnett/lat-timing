@@ -9,6 +9,7 @@ import os, sys
 from scipy import (optimize, linalg)
 from scipy.linalg import (LinAlgError, LinAlgWarning)
 import keyword_options, poisson
+from astropy.stats.bayesian_blocks import * 
 
 data=None # data_managment.Data obect for access to name, verbose, etc.
 
@@ -29,7 +30,7 @@ class LogLike(object):
             return None
             #raise RuntimeError('Fit failure')
         hess = self.hessian(pars)
-        outdict = dict(t=self.t, exp=self.exp, counts=len(self.w) )
+        outdict = dict(t=self.t, tw=self.ts, fexp=self.fexp, counts=len(self.w) )
         if len(pars)==1:
             outdict.update(flux=pars[0], sig_flux=np.sqrt(1/hess[0]))
         else:
@@ -55,7 +56,7 @@ class LogLike(object):
 
     def __repr__(self):
         return f'{self.__class__.__module__}.{self.__class__.__name__}:'\
-        f' time {self.t:.3f}, {len(self.w)} weights,  exposure {self.exp:.2f}, S {self.S:.0f}, B {self.B:.0f}'
+        f' time {self.t:.3f}, {len(self.w)} weights,  exposure {self.fexp:.2f}, S {self.S:.0f}, B {self.B:.0f}'
         
 
     def gradient(self, pars ):
@@ -191,14 +192,16 @@ class PoissonRep(object):
         ## NB: the dd=-10 is a kluge for very small limits, set for loglike stuff with different scales.
         # this seems to work, but must be looked at more carefully
         self.pf = poisson.PoissonFitter(loglike, fmax=fmax, dd=-10.)
+        self.loglike = loglike
         self.poiss=self.pf.poiss
         p = self
-        self.fit= dict(t=loglike.t, exp=loglike.exp, 
+        self.fit= dict(t=loglike.t, tw=loglike.tw, fexp=loglike.fexp, 
                        flux=np.round(p.flux,4), 
                        errors=np.abs(np.array(p.errors)-p.flux).round(3),
                        limit=np.round(p.limit, 3), 
                        ts=np.round(p.ts,3), 
-                       funct=p ) 
+                       poiss=self.poiss, 
+                      ) 
 
     def __call__(self, flux):
         return self.poiss(flux)
@@ -221,32 +224,57 @@ class PoissonRep(object):
     def ts(self):
         return self.poiss.ts
     
+    def comparison_plots(self, xlim=(0,1), ax=None, nbins=40):
+        """Plots comparing this approximation to the actual likelihhod
+        """
+        f_like = lambda x: self(x)
+        #pr = light_curve.PoissonRep(self);
+        fp = lambda x: self(x)
+        f_like = lambda x: self.loglike([x])
+        fi = self.loglike.fit_info()
+        xp = fi['flux']
+        sigp = fi['sig_flux']
+        peak = f_like(xp)
+        dom = np.linspace(xlim[0],xlim[1],nbins)
+        f_gauss = lambda x: -((x-xp)/sigp)**2/2
+        fig, ax = plt.subplots(figsize=(6,4)) if not ax else (ax.figure, ax)
+        ax.plot(dom, [f_like(x)-peak for x in dom], '-', label='Actual Likelihood');
+        ax.plot(dom, fp(dom), '--+', lw=1, label='Poisson approximation');
+        ax.plot(dom, [f_gauss(x) for x in dom], ':r', label='Gaussian approximation');
+        ax.grid(alpha=0.5);
+        ax.set(ylim=(-9,0.5));
+        ax.axhline(0, color='grey', ls='--')
+        ax.legend()
+    
 class LightCurve(object):
     """ In the language of Kerr, manage a set of cells
     """
     defaults=(
         ('min_exp', 0.3, 'mimimum exposure factor'),
-        ('rep',   'poisson', 'name of the likelihood representation: poiss, gauss, or gauss2d'),
+        ('rep',   'poisson', 'name of the likelihood representation: poisson, gauss, or gauss2d'),
         ('replist', 'gauss gauss2d poisson'.split(), 'Possible reps'),
         ('rep_class', [GaussianRep, Gaussian2dRep, PoissonRep], 'coresponding classes'),
-        ('no_fit')
-
     )
     @keyword_options.decorate(defaults)
     def __init__(self, binned_weights, **kwargs):
         """Load binned data
         parameters:
-            binned_weights : an iterable object that is a list of dicts; expect each to have
-                 keys t, exp, w, S, B
-            min_exp : filter by exposure factor
+            binned_weights : an iterable object that is a list of dicts; expect each
+                to have following keys:
+                    t, tw, fexp, w, S, B
+            min_exp : minimum fractional exposure allowed
         """
         keyword_options.process(self,kwargs)
         global data
         data=binned_weights.data
-        self.cells = [LogLike(ml) for ml in binned_weights if ml['exp']>self.min_exp] 
+
+        # select the set of cells 
+        self.cells = [LogLike(ml) for ml in binned_weights if ml['fexp']>self.min_exp] 
         if data.verbose>0:
-            print(f'Loaded {len(self)} / {len(binned_weights)} cells with exposure > {self.min_exp} for light curve analysis')
+            print(f'Loaded {len(self)} / {len(binned_weights)} cells with exposure >'\
+                  f' {self.min_exp} for light curve analysis')
         
+        # analyze using selected rep
         if self.rep not in self.replist:
             raise Exception(f'Unrecognized rep: "{self.rep}", must be one of {self.reps}')
         repcl = self.rep_class[self.replist.index(self.rep)]
@@ -298,6 +326,7 @@ class LightCurve(object):
         
         # the points with error bars
         t = bar.t
+        xerr = bar.tw/2
         y =  bar.flux.values
         if self.rep=='poisson':
             dy = [bar.errors.apply(lambda x: x[i]).clip(0,4) for i in range(2)]
@@ -309,11 +338,12 @@ class LightCurve(object):
         # now do the limits
         if len(lim)>0:
             t = lim.t
+            xerr = lim.tw/2
             y = lim.limit.values
             yerr=0.2*(1 if kw['yscale']=='linear' else y)
             ax.errorbar(x=t, y=y, xerr=xerr,
                     yerr=yerr,  color='C1', 
-                    uplims=True, ls='', lw=1, capsize=4,  capthick=0,
+                    uplims=True, ls='', lw=2, capsize=4, capthick=0,
                     alpha=0.5)
         
         #ax.axhline(1., color='grey')
@@ -353,3 +383,43 @@ class LightCurve(object):
         shist(ax2, yerr, (1e-2, 0.3), 25, 'sigma', xlog=True)
         shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
         fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
+        
+# Bayesian Blocks tentative code
+class BayesianBlocks(object):
+    """
+    """
+    def __init__(self, data, min_exp=0.3):
+        """
+        data : a main.Main object with access to data for a given source
+        """
+        # Create 1-day cells from data
+        self.data =data
+        self.bw = data.binned_weights()
+        self.verbose=data.verbose
+        self.cells = list(filter(lambda x: x['fexp']>min_exp, self.bw))
+        
+        if self.verbose>0:
+            print(f'Selected {len(self.cells)} / {len(self.bw)} with exposure > {min_exp}')
+        self.nn = np.array([len(cell['w']) for cell in self.cells]) #number per cell
+        self.tt = np.array([cell['t'] for cell in self.cells])      # cell time
+
+    def partition(self, **kwargs):
+        """
+        Partition the interval into blocks using counts
+        Return a BinnedWeights object using the partition
+        """
+        class MyEvents(FitnessFunc):
+            def __init__(self, p0=0.1, gamma=None, ncp_prior=None):
+                super().__init__(p0, gamma, ncp_prior)
+            def fitness(self, N_k, T_k):
+                # eq. 19 from Scargle 2012
+                return N_k * (np.log(N_k) - np.log(T_k))
+        edges = bayesian_blocks(t=self.tt, x = self.nn.astype(float), p0=0.1, fitness=MyEvents)
+        if self.verbose>0:
+            print(f'Partitioned data into {len(edges)-1} blocks, using FitnessFunc class {MyEvents}')
+        return self.data.binned_weights(edges)
+        
+    def light_curve(self, bw=None, rep='poisson'):
+        """ Return a LightCurve object using the input bw, or the basic one.
+        """        
+        return LightCurve(bw or self.bw, rep=rep, min_exp=0.01)

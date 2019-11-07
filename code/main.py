@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
 import keyword_options
 #import exposure 
-from data_management import Data, BinnedWeights
+from data_management import Data#, BinnedWeights
+from binner import BinnedWeights
 
 
 class Main(object):
@@ -45,16 +46,22 @@ class Main(object):
         if self.weight_file:
             self._process_weights()
             
-    def binned_weights(self):
-        """ return a BinnedWeight object for access to each set of binned weights
+    def binned_weights(self, bins=None):
+        """ 
+        Parameter:
+            bins : None | float | array
+                if None, use defaults
+                Otherwise an array of bin edges
+        Returns: a BinnedWeight object for access to each set of binned weights
             The object can be indexed, or used in a for loop
-            bw[i] returns a  dict (t, exp, w, S, B)
+            bw[i] returns a  dict (t, tw, fexp, w, S, B)
             where t   : bin center time (MJD)
-                  exp : associated exposure as fraction of mean
+                  tw  : bin width in days (assume 1 if not preseent)
+                  fexp: associated fractional exposure
                   w   : array of weights for the time range
                   S,B : predicted source, background counts for this bin
             """
-        return BinnedWeights(self.data,)
+        return BinnedWeights(self.data, bins)
 
     def _process_weights(self):
         # add the weights to the photon dataframe
@@ -115,7 +122,7 @@ class Main(object):
 #         fig.suptitle(f'Normalized flux for {self.name}')
     
 
-    def plot_time(self, delta_max=2, delta_t=2, xlim=None):
+    def plot_time(self, radius_max=2, delta_t=2, xlim=None):
         """
         """
         df = self.df
@@ -127,22 +134,22 @@ class Main(object):
         fig,ax= plt.subplots(figsize=(15,5))
         hkw = dict(bins = np.linspace(ta,tb,Nbins), histtype='step')
         ax.hist(t, label='E>100 MeV', **hkw)
-        ax.hist(t[(df.delta<delta_max) & (df.band>0)], label='delta<{} deg'.format(delta_max), **hkw)
+        ax.hist(t[(df.radius<radius_max) & (df.band>0)], label=f'radius<{radius_max} deg', **hkw)
         ax.set(xlabel=r'$\mathrm{MJD}$', ylabel='counts per {:.0f} day'.format(delta_t))
         if xlim is not None: ax.set(xlim=xlim)
         ax.legend()
         ax.set_title('{} counts vs. time'.format(self.name))
 
-    def plot_delta(self, cumulative=False, squared=True):
+    def plot_radius(self, cumulative=False, squared=True):
         plt.rc('font', size=12)
         df = self.df
         fig,ax = plt.subplots(figsize=(6,3))
-        x = df.delta**2 if squared else df.delta
+        x = df.radius**2 if squared else df.radius
         hkw = dict(bins=np.linspace(0, 25 if squared else 5, 100), 
                    histtype='step',lw=2,cumulative=cumulative)
         ax.hist(x, label='E>100 MeV', **hkw)
         ax.hist(x[df.band>8], label='E>1 GeV', **hkw)
-        ax.set(yscale='log', xlabel='delta**2 [deg^2]' if squared else 'delta [deg]', 
+        ax.set(yscale='log', xlabel='radius**2 [deg^2]' if squared else 'delta [deg]', 
             ylabel='cumulative counts' if cumulative else 'counts'); 
         ax.legend(loc='upper left' if cumulative else 'upper right');
 
