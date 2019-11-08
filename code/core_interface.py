@@ -1,7 +1,6 @@
 """
 """
 import numpy as np
-import matplotlib.pyplot as plt
 import pandas as pd
 import os, sys
 import core
@@ -22,10 +21,10 @@ class CoreInterface(object):
         global data
         data=binned_weights.data
    
+        # Create list of raw cells
         # Required parameters for the core.Cell constructor
         cell_pars=dict(tstart=0,tstop=0,exposure=1,photon_times=[],photon_weights=[],
                     source_to_background_ratio=0.5)
-
         cells=[]; rejected=0
         
         for c in binned_weights: # loop over interval information dicts
@@ -33,7 +32,9 @@ class CoreInterface(object):
             if fexp<min_exp:
                 rejected+=1
                 continue
-            cell_pars.update(tstart=t-0.5*tw, tstop=t+0.5*tw, 
+            # note: convert times to MET using expression in core
+            cell_pars.update(tstart=core.mjd2met(t-0.5*tw),
+                             tstop=core.mjd2met(t+0.5*tw), 
                              photon_weights=w, 
                              exposure=S, 
                              source_to_background_ratio=S/B)
@@ -44,32 +45,51 @@ class CoreInterface(object):
             if rejected>0:
                 print(f'\trejected {rejected} with fractional exposure < {min_exp:.2f}')
         if len(cells)==0:
-            raise Exception(f'Failed to find any cell with frational exposure> {min_exp}')
+            raise Exception(f'Failed to find any cell with frational exposure > {min_exp}')
         
-        self.cells = cells
-        #self.cll = core.CellsLogLikelihood(cells) 
+        # generate the likelihood functions for all cells
+        self.cll = core.CellsLogLikelihood(cells) 
 
     def __repr__(self):
-        return f'{self.__class__}\t {len(self.cells)} cells'
+        return f'{self.__class__}\t {len(self.clls)} cells'
     
-    def lightcurve(self, dataframe=True, *pars):
+    def to_dataframe(self, rvals):
+        """convert the rvals array, with shape (N,5) to a dataframe
+        columns are:
+            time: value in MJD
+            dt: bin width
+            rate : relative rate or 95% CL limit if error[1]==-1
+            error: rate error bar unless error[1]==-1
+        """
+        rvt = rvals.T
+        return pd.DataFrame.from_dict(
+                    dict(
+                         time=rvt[0], 
+                         dt=rvt[1], 
+                         rate=rvt[2].round(4),
+                         error=[ tuple(u) for u in rvals[:,3:].round(4)],
+                        )  
+                      )
+
+    
+    def bb_lightcurve(self, dataframe=True, *pars):
         """ Return a Bayesian blocks flux density light curve
         pars:
-            tsmin=4,plot_years=False,plot_phase=False,
-            get_ts=False
+            tsmin=4, plot_years=False, plot_phase=False, bb_prior=8
         """
-        rvals =  self.cll.get_lightcurve(*pars)
+        rvals =  self.cll.get_bb_lightcurve(*pars)
         if not dataframe: return rvals
-        return pd.DataFrame([rvals[:,0],rvals[:,2], 0.5*(rvals[:,3]+rvals[:,4]), ],
-                            index='time rate error'.split()).T
+        return self.to_dataframe(rvals)
     
-    def bb_lightcurve(self, *pars):
+    def lightcurve(self, dataframe=True, *pars):
         """Return a flux density light curve for the raw cells.
-        pars:tsmin=4,plot_years=False,plot_phase=False,
-            bb_prior=8
-
+        
+        pars:
+            tsmin=4, plot_years=False, plot_phase=False,  get_ts=False
         """
-        return self.cll.get_bb_lightcurve(*pars)
+        rvals = self.cll.get_lightcurve(*pars)
+        if not dataframe: return rvals
+        return self.to_dataframe(rvals)
     
     def plot_bb(self, *pars):
         """tsmin=4,fignum=2,clear=True,color='C3',
@@ -81,7 +101,3 @@ class CoreInterface(object):
     
     def plot_lc(self, *pars):
         return self.cll.plot_clls_lc(*pars)
-
-    # @property
-    # def cells(self):
-    #     return self.cll.cells
