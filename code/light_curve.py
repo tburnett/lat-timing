@@ -388,7 +388,7 @@ class LightCurve(object):
 class BayesianBlocks(object):
     """
     """
-    def __init__(self, data, min_exp=0.3):
+    def __init__(self, data, min_exp=0.1):
         """
         data : a main.Main object with access to data for a given source
         """
@@ -400,26 +400,41 @@ class BayesianBlocks(object):
         
         if self.verbose>0:
             print(f'Selected {len(self.cells)} / {len(self.bw)} with exposure > {min_exp}')
-        self.nn = np.array([len(cell['w']) for cell in self.cells]) #number per cell
-        self.tt = np.array([cell['t'] for cell in self.cells])      # cell time
+
 
     def partition(self, **kwargs):
         """
-        Partition the interval into blocks using counts
+        Partition the interval into blocks using counts and cumulative exposure
         Return a BinnedWeights object using the partition
         """
+        
+        nn = np.array([len(cell['w']) for cell in self.cells]) #number per cell
+
+        assert min(nn)>0, 'Attempt to Include a cell with no contents'
+
+        mjd = np.array([cell['t'] for cell in self.cells])        
+        cumexp = np.cumsum( [cell['fexp'] for cell in self.cells]  )
+       
         class MyEvents(FitnessFunc):
             def __init__(self, p0=0.1, gamma=None, ncp_prior=None):
                 super().__init__(p0, gamma, ncp_prior)
             def fitness(self, N_k, T_k):
                 # eq. 19 from Scargle 2012
                 return N_k * (np.log(N_k) - np.log(T_k))
-        edges = bayesian_blocks(t=self.tt, x = self.nn.astype(float), p0=0.1, fitness=MyEvents)
+            
+        # Now run the astropy Bayesian Blocks code using the 'event' model
+        exp_edges = bayesian_blocks(t=cumexp, 
+                                    x=nn.astype(float),
+                                    fitness=MyEvents)
         if self.verbose>0:
-            print(f'Partitioned data into {len(edges)-1} blocks, using FitnessFunc class {MyEvents}')
-        return self.data.binned_weights(edges)
+            print(f'Partitioned data into {len(exp_edges)-1} blocks, using FitnessFunc class {MyEvents}')
+        
+        # convert back from cumexp to mjd and rebin data
+        mjd_index = np.searchsorted(cumexp, exp_edges)
+        mjd_edges = mjd[mjd_index]
+        return self.data.binned_weights(mjd_edges)
         
     def light_curve(self, bw=None, rep='poisson'):
-        """ Return a LightCurve object using the input bw, or the basic one.
+        """ Return a LightCurve object using the specified BinnedWeights object, or default to the daily one.
         """        
         return LightCurve(bw or self.bw, rep=rep, min_exp=0.01)
