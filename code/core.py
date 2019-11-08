@@ -574,7 +574,7 @@ class CellLogLikelihood(object):
                 amax = amax - f0/f1
                 if abs(f0) < 0.1:
                     break
-        if not include_zero:
+        if not include_zero and (aopt>0):
             # ditto, lower side
             t[:] = aopt*we + iw
             # use Taylor approximation to get initial guess
@@ -979,13 +979,13 @@ class CellsLogLikelihood(object):
 
         # NB might want to use a CellsLogLikelihood to avoid overhead of 3x
         # size on BB computation
-        plot_phase = plot_phase or isinstance(self,PhaseCellsLogLikelihood)
+        #THB plot_phase = plot_phase or isinstance(self,PhaseCellsLogLikelihood)
 
         if ax is None:
-            pl.figure(fignum)
+            plt.figure(fignum)
             if clear:
-                pl.clf()
-            ax = pl.gca()
+                plt.clf()
+            ax = plt.gca()
 
         if log_scale:
             ax.set_yscale('log')
@@ -1056,7 +1056,7 @@ class CellsLogLikelihood(object):
 
         if plot_phase:
             ax.set_xlabel('Pulse Phase')
-            ax.axis([0,1,pl.axis()[2],pl.axis()[3]])
+            ax.axis([0,1,plt.axis()[2],plt.axis()[3]])
         elif plot_years:
             ax.set_xlabel('Year')
         else:
@@ -1069,11 +1069,11 @@ class CellsLogLikelihood(object):
         """ Return a flux density light curve for the raw cells.
         """
 
-        plot_phase = False #### plot_phase or isinstance(self,PhaseCellsLogLikelihood)
+        #THB plot_phase = False #### plot_phase or isinstance(self,PhaseCellsLogLikelihood)
 
         # now, do same for Bayesian blocks
         bb_idx,bb_ts,var_ts,var_dof,fitness = self.do_bb(prior=bb_prior)
-        print(var_ts,var_dof)
+        print(f'var_ts: {var_ts}, var_dof: {var_dof}')
         print('Variability significance: ',chi2.sf(var_ts,var_dof))
         bb_idx = np.append(bb_idx,len(self.cells))
         rvals_bb = np.empty([len(bb_idx)-1,5])
@@ -1123,7 +1123,7 @@ def cell_from_cells(cells):
     tstart = cells[0].tstart
     we = np.concatenate([c.we for c in cells])
     ti = np.concatenate([c.we for c in cells])
-    exp = np.sum((c.exp for c in cells))
+    exp = sum((c.exp for c in cells)) #THB: was np.sum
     ### THB slight mod to deal with apparent round-off for me
     #if not np.all(np.asarray([c.SonB for c in cells])==cells[0].SonB):
     if np.array([x.SonB for x in cells]).std()>1e-6:
