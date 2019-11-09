@@ -245,15 +245,35 @@ class PoissonRep(object):
         ax.set(ylim=(-9,0.5));
         ax.axhline(0, color='grey', ls='--')
         ax.legend()
+        
+
+class PoissonRepTable(PoissonRep):
     
+    def __init__(self, loglike):
+        # PoissonRep fits to Poisson
+        super().__init__(loglike, )
+        # now make a table and add to dict
+        dom,cod = self.create_table()
+        self.fit['dom']=dom
+        self.fit['cod']=cod.astype(np.float32)
+        
+    def create_table(self, npts=100, support=1e-6):
+        # make a table of evently-spaced points between limits
+        p = self.fit['poiss']
+        a,b = p.cdfinv(support), p.cdfcinv(support)
+        dom=(a,b,npts)
+        cod = np.array(list(map(p, np.linspace(*dom)))) .astype(np.float32)
+        return dom, cod
+        
+        
 class LightCurve(object):
     """ In the language of Kerr, manage a set of cells
     """
     defaults=(
         ('min_exp', 0.3, 'mimimum exposure factor'),
         ('rep',   'poisson', 'name of the likelihood representation: poisson, gauss, or gauss2d'),
-        ('replist', 'gauss gauss2d poisson'.split(), 'Possible reps'),
-        ('rep_class', [GaussianRep, Gaussian2dRep, PoissonRep], 'coresponding classes'),
+        ('replist', 'gauss gauss2d poisson poisson_table'.split(), 'Possible reps'),
+        ('rep_class', [GaussianRep, Gaussian2dRep, PoissonRep, PoissonRepTable], 'coresponding classes'),
     )
     @keyword_options.decorate(defaults)
     def __init__(self, binned_weights, **kwargs):
@@ -276,7 +296,7 @@ class LightCurve(object):
         
         # analyze using selected rep
         if self.rep not in self.replist:
-            raise Exception(f'Unrecognized rep: "{self.rep}", must be one of {self.reps}')
+            raise Exception(f'Unrecognized rep: "{self.rep}", must be one of {self.replist}')
         repcl = self.rep_class[self.replist.index(self.rep)]
         try:
             self.fit_df = self.fit(repcl)
@@ -384,7 +404,85 @@ class LightCurve(object):
         shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
         fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
         
-# Bayesian Blocks tentative code
+
+       
+class MyFitness(FitnessFunc):
+    
+    def __init__(self, p0=0.05, gamma=None, ncp_prior=None,):
+        #super().__init__(p0, gamma, ncp_prior)
+        self.ncp_prior = ncp_prior
+        
+    def fitness(self, R): # N_k, w_k):
+        """ For cells [0,R) return array of length R+1 of the maximum likelihoods for combined cells 
+        0..R, 1..R, ... R
+        """
+        # exposures and corresponding counts
+        w_k = self.block_length[:R + 1] - self.block_length[R + 1]
+        N_k = np.cumsum(self.x[:R + 1][::-1])[::-1]
+        
+        # eq. 26 from Scargle 2012
+        return N_k * (np.log(N_k) - np.log(w_k))
+    
+    def fit(self, t, x, sigma):
+        """Fit the Bayesian Blocks model given the specified fitness function.
+
+        Parameters
+        ----------
+        t : array_like
+            data times (one dimensional, length N)
+            here the cumulative exposure, corresponding to Scargle 2012 Section 3.2
+        x : array_like 
+            data values, here the counts per bin
+        Returns
+        -------
+        edges : ndarray
+            array containing the (M+1) edges defining the M optimal bins
+        """
+        t, self.x, sigma = self.validate_input(t, x)
+
+        # create length-(N + 1) array of cell edges
+        edges = np.concatenate([t[:1],
+                                0.5 * (t[1:] + t[:-1]),
+                                t[-1:]])
+        self.block_length = t[-1] - edges
+
+        # arrays to store the best configuration
+        N = len(t)
+        best = np.zeros(N, dtype=float)
+        last = np.zeros(N, dtype=int)
+
+        # ----------------------------------------------------------------
+        # Start with first data cell; add one cell at each iteration
+        # ----------------------------------------------------------------
+        for R in range(N):
+
+            # evaluate fitness function
+            fit_vec = self.fitness(R)
+
+            A_R = fit_vec - self.ncp_prior
+            A_R[1:] += best[:R]
+
+            i_max = np.argmax(A_R)
+            last[R] = i_max
+            best[R] = A_R[i_max]
+
+        # ----------------------------------------------------------------
+        # Now find changepoints by iteratively peeling off the last block
+        # ----------------------------------------------------------------
+        change_points = np.zeros(N, dtype=int)
+        i_cp = N
+        ind = N
+        while True:
+            i_cp -= 1
+            change_points[i_cp] = ind
+            if ind == 0:
+                break
+            ind = last[ind - 1]
+        change_points = change_points[i_cp:]
+
+        return edges[change_points]
+    
+    
 class BayesianBlocks(object):
     """
     """
@@ -394,47 +492,43 @@ class BayesianBlocks(object):
         """
         # Create 1-day cells from data
         self.data =data
-        self.bw = data.binned_weights()
         self.verbose=data.verbose
+        
+        self.bw = data.binned_weights()
         self.cells = list(filter(lambda x: x['fexp']>min_exp, self.bw))
         
         if self.verbose>0:
             print(f'Selected {len(self.cells)} / {len(self.bw)} with exposure > {min_exp}')
-
-
-    def partition(self, **kwargs):
+           
+    def partition(self, p0=0.05, **kwargs):
         """
         Partition the interval into blocks using counts and cumulative exposure
         Return a BinnedWeights object using the partition
         """
         
-        nn = np.array([len(cell['w']) for cell in self.cells]) #number per cell
+        self.nn = np.array([len(cell['w']) for cell in self.cells]) #number per cell
 
-        assert min(nn)>0, 'Attempt to Include a cell with no contents'
+        assert min(self.nn)>0, 'Attempt to Include a cell with no contents'
 
         mjd = np.array([cell['t'] for cell in self.cells])        
-        cumexp = np.cumsum( [cell['fexp'] for cell in self.cells]  )
-       
-        class MyEvents(FitnessFunc):
-            def __init__(self, p0=0.1, gamma=None, ncp_prior=None):
-                super().__init__(p0, gamma, ncp_prior)
-            def fitness(self, N_k, T_k):
-                # eq. 19 from Scargle 2012
-                return N_k * (np.log(N_k) - np.log(T_k))
-            
-        # Now run the astropy Bayesian Blocks code using the 'event' model
-        exp_edges = bayesian_blocks(t=cumexp, 
-                                    x=nn.astype(float),
-                                    fitness=MyEvents)
+        self.cumexp = np.cumsum( [cell['fexp'] for cell in self.cells]  )
+        N = len(mjd)
+        ncp_prior = FitnessFunc(p0).compute_ncp_prior(N)
+                  
+        # Now run the astropy Bayesian Blocks code using my version of the 'event' model
+        exp_edges = bayesian_blocks(t=self.cumexp, 
+                                    x=self.nn.astype(float),
+                                    fitness=MyFitness, ncp_prior=ncp_prior)
         if self.verbose>0:
-            print(f'Partitioned data into {len(exp_edges)-1} blocks, using FitnessFunc class {MyEvents}')
+            print(f'Partitioned {N} cells into {len(exp_edges)-1} blocks, with prior {ncp_prior:.1f}\n'\
+                  f' Used FitnessFunc class {MyFitness} ' )
         
         # convert back from cumexp to mjd and rebin data
-        mjd_index = np.searchsorted(cumexp, exp_edges)
+        mjd_index = np.searchsorted(self.cumexp, exp_edges)
         mjd_edges = mjd[mjd_index]
         return self.data.binned_weights(mjd_edges)
         
-    def light_curve(self, bw=None, rep='poisson'):
+    def light_curve(self, bw=None, rep='poisson', min_exp=0.1):
         """ Return a LightCurve object using the specified BinnedWeights object, or default to the daily one.
         """        
-        return LightCurve(bw or self.bw, rep=rep, min_exp=0.01)
+        return LightCurve(bw or self.bw, rep=rep, min_exp=min_exp)
