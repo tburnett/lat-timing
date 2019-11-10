@@ -10,9 +10,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
 import keyword_options
-#import exposure 
-from data_management import Data#, BinnedWeights
-from binner import BinnedWeights
+
+from data_management import TimedData#, BinnedWeights
+
 
 
 class Main(object):
@@ -40,7 +40,7 @@ class Main(object):
         keyword_options.process(self,kwargs)
 
         self._set_geometry(name, position)
-        self.data = Data(self, source_name=name, verbose=self.verbose)
+        self.data = TimedData(self, source_name=name, verbose=self.verbose)
         self.df = self.data.photon_data
         
         if self.weight_file:
@@ -61,7 +61,7 @@ class Main(object):
                   w   : array of weights for the time range
                   S,B : predicted source, background counts for this bin
             """
-        return BinnedWeights(self.data, bins)
+        return self.data.binned_weights( bins)
 
     def _process_weights(self):
         # add the weights to the photon dataframe

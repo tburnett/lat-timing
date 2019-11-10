@@ -27,10 +27,10 @@ class LogLike(object):
         if pars is None:
             if data.verbose>0:
                 print(f'Fail fit for {self}')
-            return None
-            #raise RuntimeError('Fit failure')
+            #return None
+            raise RuntimeError(f'Fit failure: {self}')
         hess = self.hessian(pars)
-        outdict = dict(t=self.t, tw=self.ts, fexp=self.fexp, counts=len(self.w) )
+        outdict = dict(t=self.t, tw=self.tw, fexp=self.fexp, counts=len(self.w) )
         if len(pars)==1:
             outdict.update(flux=pars[0], sig_flux=np.sqrt(1/hess[0]))
         else:
@@ -92,7 +92,7 @@ class LogLike(object):
             a, b, c = np.sum(w**2/Dsq), np.sum(w*(1-w)/Dsq), np.sum((1-w)**2/Dsq)
             return np.array([[a,b], [b,c]])
         
-    def rate(self, fix_beta=True, debug=False, no_ts=True):
+    def rate(self, fix_beta=True, debug=False, no_ts=False):
         """Return signal rate and its error"""
         try:
             s = self.solve(fix_beta )
@@ -118,7 +118,7 @@ class LogLike(object):
         f = lambda pars: -self(pars)
         return optimize.fmin_cg(f, estimate[0:1] if fix_beta else estimate, **kw)
 
-    def solve(self, fix_beta=True, debug=False, estimate=[0.5,0],**fit_kw):
+    def solve(self, fix_beta=True, debug=True, estimate=[0.5,0],**fit_kw):
         """Solve non-linear equation(s) from setting gradient to zero 
         note that the hessian is a jacobian
         """
@@ -133,6 +133,8 @@ class LogLike(object):
             if debug or data.verbose>2:
                 print(f'Runtime fsolve warning for cell {self}, \n\t {msg}')
             return None
+        except Exception as msg:
+            raise Exception(msg)
         return np.array(ret)
         
     def plot(self, fix_beta=True, xlim=(0,1.2),ax=None, title=None):
@@ -195,7 +197,8 @@ class PoissonRep(object):
         self.loglike = loglike
         self.poiss=self.pf.poiss
         p = self
-        self.fit= dict(t=loglike.t, tw=loglike.tw, fexp=loglike.fexp, 
+        self.fit= dict(t=loglike.t, tw=loglike.tw, counts=len(loglike.w), 
+                       fexp=loglike.fexp, 
                        flux=np.round(p.flux,4), 
                        errors=np.abs(np.array(p.errors)-p.flux).round(3),
                        limit=np.round(p.limit, 3), 
@@ -286,7 +289,7 @@ class LightCurve(object):
         """
         keyword_options.process(self,kwargs)
         global data
-        data=binned_weights.data
+        self.data=data=binned_weights.data
 
         # select the set of cells 
         self.cells = [LogLike(ml) for ml in binned_weights if ml['fexp']>self.min_exp] 
@@ -302,6 +305,7 @@ class LightCurve(object):
             self.fit_df = self.fit(repcl)
         except Exception as msg:
             print(f'Fail fit: {msg}')
+            raise Exception(msg)
          
     def __repr__(self):
         return f'{self.__class__} {len(self.cells)} cells fit with rep {self.rep}'
@@ -328,6 +332,12 @@ class LightCurve(object):
             print(f'Fits using representation {self.rep}: {len(self)} intervals\n  columns: {list(df.columns)} ')
         return df 
 
+    @property
+    def dataframe(self):
+        """return the summary DataFrame
+        """
+        return self.fit_df
+    
     def flux_plot(self, ts_max=9, xerr=0.5, title=None, ax=None, **kwargs): 
         """Make a plot of flux with according to the representation
         """
@@ -405,49 +415,67 @@ class LightCurve(object):
         fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
         
 
-       
 class MyFitness(FitnessFunc):
+    """
+    Adapted version of a astropy.stats.bayesian_blocks.FitnessFunc
+    Considerably modified to give the `fitness function` access to the cell data.
+    Currently just implements the Event model using exposure instead of time.
     
-    def __init__(self, p0=0.05, gamma=None, ncp_prior=None,):
-        #super().__init__(p0, gamma, ncp_prior)
-        self.ncp_prior = ncp_prior
+    """
+    
+    def __init__(self, cell_df, p0=0.05,):
+        """cell_df : a DataFrame, including exposure (fexp) and counts (counts), 
+            as well as a representation of the likelihood for each cell
+        """
+        self.p0=p0
+        self.df=df=cell_df 
+        N = self.N = len(df)
+        # Invoke empirical function from Scargle 2012 
+        self.ncp_prior = self.p0_prior(N)
         
-    def fitness(self, R): # N_k, w_k):
-        """ For cells [0,R) return array of length R+1 of the maximum likelihoods for combined cells 
+        # counts per cell
+        self.nn = df.counts.values 
+        assert min(self.nn)>0, 'Attempt to Include a cell with no contents'
+
+        #actual times
+        self.mjd = np.concatenate([df.t.values, [max(df.t.values)+1]] ) # put one at the end 
+        
+        # edges and block_length use exposure as "time"
+        fexp = df.fexp.values
+        self.edges = np.concatenate([[0], np.cumsum(fexp)])
+
+        # replaced this 
+        #         self.edges = np.concatenate([t[:1],
+        #                         0.5 * (t[1:] + t[:-1]),
+        #                         t[-1:]])
+        
+        self.block_length = self.edges[-1] - self.edges
+        
+    def __call__(self, R): 
+        """ The fitness function needed for BB algorithm 
+        For cells 0..R return array of length R+1 of the maximum likelihoods for combined cells 
         0..R, 1..R, ... R
         """
         # exposures and corresponding counts
         w_k = self.block_length[:R + 1] - self.block_length[R + 1]
-        N_k = np.cumsum(self.x[:R + 1][::-1])[::-1]
+        N_k = np.cumsum(self.nn[:R + 1][::-1])[::-1]
         
         # eq. 26 from Scargle 2012
         return N_k * (np.log(N_k) - np.log(w_k))
     
-    def fit(self, t, x, sigma):
+    def fit(self):
         """Fit the Bayesian Blocks model given the specified fitness function.
-
-        Parameters
-        ----------
-        t : array_like
-            data times (one dimensional, length N)
-            here the cumulative exposure, corresponding to Scargle 2012 Section 3.2
-        x : array_like 
-            data values, here the counts per bin
+        Refactored version using code from bayesian_blocks.FitnesFunc.fit
         Returns
         -------
         edges : ndarray
             array containing the (M+1) edges defining the M optimal bins
         """
-        t, self.x, sigma = self.validate_input(t, x)
-
-        # create length-(N + 1) array of cell edges
-        edges = np.concatenate([t[:1],
-                                0.5 * (t[1:] + t[:-1]),
-                                t[-1:]])
-        self.block_length = t[-1] - edges
-
+        # This is the basic Scargle algoritm, copied almost verbatum
+        # ---------------------------------------------------------------
+        
         # arrays to store the best configuration
-        N = len(t)
+        N = self.N 
         best = np.zeros(N, dtype=float)
         last = np.zeros(N, dtype=int)
 
@@ -457,7 +485,7 @@ class MyFitness(FitnessFunc):
         for R in range(N):
 
             # evaluate fitness function
-            fit_vec = self.fitness(R)
+            fit_vec = self(R)
 
             A_R = fit_vec - self.ncp_prior
             A_R[1:] += best[:R]
@@ -480,55 +508,43 @@ class MyFitness(FitnessFunc):
             ind = last[ind - 1]
         change_points = change_points[i_cp:]
 
-        return edges[change_points]
+        exp_edges =  self.edges[change_points]
+
+        # convert from exposure edges to equivalent MJD values
+        mjd_index = np.searchsorted(self.edges, exp_edges)
+        mjd_edges = self.mjd[mjd_index]
+        return mjd_edges
     
     
 class BayesianBlocks(object):
     """
     """
-    def __init__(self, data, min_exp=0.1):
+    def __init__(self, lc, verbose=1):
         """
-        data : a main.Main object with access to data for a given source
+        lc : a  LIghtCurve object with a DataFrame
         """
-        # Create 1-day cells from data
-        self.data =data
-        self.verbose=data.verbose
-        
-        self.bw = data.binned_weights()
-        self.cells = list(filter(lambda x: x['fexp']>min_exp, self.bw))
-        
-        if self.verbose>0:
-            print(f'Selected {len(self.cells)} / {len(self.bw)} with exposure > {min_exp}')
-           
+ 
+        self.data = lc.data
+        self.cells = lc.dataframe
+        self.verbose = self.data.verbose
+          
     def partition(self, p0=0.05, **kwargs):
         """
         Partition the interval into blocks using counts and cumulative exposure
         Return a BinnedWeights object using the partition
         """
-        
-        self.nn = np.array([len(cell['w']) for cell in self.cells]) #number per cell
-
-        assert min(self.nn)>0, 'Attempt to Include a cell with no contents'
-
-        mjd = np.array([cell['t'] for cell in self.cells])        
-        self.cumexp = np.cumsum( [cell['fexp'] for cell in self.cells]  )
-        N = len(mjd)
-        ncp_prior = FitnessFunc(p0).compute_ncp_prior(N)
-                  
+                 
         # Now run the astropy Bayesian Blocks code using my version of the 'event' model
-        exp_edges = bayesian_blocks(t=self.cumexp, 
-                                    x=self.nn.astype(float),
-                                    fitness=MyFitness, ncp_prior=ncp_prior)
+        fitness = MyFitness(self.cells)
+        edges = fitness.fit() 
+        
         if self.verbose>0:
-            print(f'Partitioned {N} cells into {len(exp_edges)-1} blocks, with prior {ncp_prior:.1f}\n'\
+            print(f'Partitioned {fitness.N} cells into {len(edges)-1} blocks, with prior {fitness.ncp_prior:.1f}\n'\
                   f' Used FitnessFunc class {MyFitness} ' )
         
-        # convert back from cumexp to mjd and rebin data
-        mjd_index = np.searchsorted(self.cumexp, exp_edges)
-        mjd_edges = mjd[mjd_index]
-        return self.data.binned_weights(mjd_edges)
+        return self.data.binned_weights(edges)
         
     def light_curve(self, bw=None, rep='poisson', min_exp=0.1):
-        """ Return a LightCurve object using the specified BinnedWeights object, or default to the daily one.
+        """ Return a LightCurve object using the specified BinnedWeights object,
         """        
-        return LightCurve(bw or self.bw, rep=rep, min_exp=min_exp)
+        return LightCurve(bw, rep=rep, min_exp=min_exp)

@@ -12,6 +12,7 @@ from astropy.io import fits
 from astropy.time import Time, TimeDelta
 from astropy.coordinates import SkyCoord
 from effective_area import EffectiveArea
+from binner import BinnedWeights
 import keyword_options
 
 mission_start = Time('2001-01-01T00:00:00', scale='utc').mjd
@@ -28,7 +29,7 @@ def UTC(mjd):
     return t.value
 
 
-class Data(object):
+class TimedData(object):
     """Manage the file-based data sets for photons, livetime, and space craft orientation history
     """
     
@@ -88,23 +89,23 @@ class Data(object):
                   f'in range ({time_bins[0]:.1f}, {time_bins[-1]:.1f})')
         return time_bins 
 
-
-    # def binner(self, step=None, start=None, stop=None,):
-    #     """Basic binner returns binned exposure and bin definition for histograms 
-
-    #     parameters:
-    #         step : bin size, default self.interval
-    #         start, stop: optional: default to ends
-
-    #     return: a tuple
-    #         time_bins , binned_exposure
-    #     """
-        
-
-        
-
-        
-        # return time_bins, self.get_binned_exposure(time_bins)
+    def binned_weights(self, bins=None):
+        """ 
+        Parameter:
+            bins : None | float | array
+                if None, use defaults
+                Otherwise an array of bin edges
+        Returns: a BinnedWeight object for access to each set of binned weights
+            The object can be indexed, or used in a for loop
+            bw[i] returns a  dict (t, tw, fexp, w, S, B)
+            where t   : bin center time (MJD)
+                  tw  : bin width in days (assume 1 if not preseent)
+                  fexp: associated fractional exposure
+                  w   : array of weights for the time range
+                  S,B : predicted source, background counts for this bin
+            """
+        return BinnedWeights(self, bins)
+     
 
     def get_binned_exposure(self, time_bins):
 
@@ -467,36 +468,7 @@ class Data(object):
         if self.verbose>1:
             print(f'\t{gti}')
         return gti
-    
-class BinnedWeights(object):
-    """ manage access to weights"""
-    
-    def __init__(self, data):
-        
-        # get predefined bin data and corresponding fractional exposure 
-        self.data = data 
-        bins, exposure = data.binner()
-        self.bins=bins
-        self.N = len(bins)-1 # number of bins
-        self.bin_centers = 0.5*(self.bins[1:]+self.bins[:-1])
-        self.fexposure = exposure/np.sum(exposure)
-        self.source_name = data.source_name
-        self.verbose = data.verbose
-
-        # get the photon data with good weights, not NaN
-        w = data.photon_data.weight
-        good = np.logical_not(np.isnan(w))
-        self.photons = data.photon_data.loc[good]
-
-        # use photon times to get indices of bin edges
-        self.weights = w = self.photons.weight.values
-        self.edges = np.searchsorted(self.photons.time, self.bins)
-        
-        # estimates for total signal and background
-        self.S = np.sum(w)
-        self.B = np.sum(1-w)
-
-        
+           
     def __repr__(self):
         return f'''{self.__class__}:  
         {len(self.fexposure)} intervals from {self.bins[0]:.1f} to {self.bins[-1]:.1f} for source {self.source_name}

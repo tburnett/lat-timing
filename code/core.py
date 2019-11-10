@@ -795,6 +795,8 @@ class CellsLogLikelihood(object):
             #rvals[-(i+1)] = cod[amax]
             #rvals[-(i+1)] = np.max(cod)
 
+        if np.any(np.isinf(rvals)):
+            raise RuntimeError(f'fitness({i0, i1}) returned inf')
         return rvals*2
 
     def do_bb(self,prior=2):
@@ -835,6 +837,8 @@ class CellsLogLikelihood(object):
         # calculate overall variability TS
         var_dof = len(indices)-1
         var_ts = (best_fitness-tmp[0][0])+prior*var_dof
+        if np.isinf(var_ts):
+            raise RuntimeError('var_ts infinite')
 
         return indices,best_fitness+len(indices)*prior,var_ts,var_dof,fitness_vals
 
