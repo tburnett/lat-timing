@@ -329,7 +329,9 @@ class LightCurve(object):
 
         df = pd.DataFrame.from_dict(outd, orient='index', dtype=np.float32)
         if data.verbose>0:
-            print(f'Fits using representation {self.rep}: {len(self)} intervals\n  columns: {list(df.columns)} ')
+            print(f'Fits using representation {self.rep}: {len(self)} intervals')
+            if data.verbose>1:
+                print(f'    columns: {list(df.columns)} ')
         return df 
 
     @property
