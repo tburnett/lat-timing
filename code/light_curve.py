@@ -417,7 +417,7 @@ class LightCurve(object):
         fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
         
 
-class MyFitness(FitnessFunc):
+class CountFitness(FitnessFunc):
     """
     Adapted version of a astropy.stats.bayesian_blocks.FitnessFunc
     Considerably modified to give the `fitness function` access to the cell data.
@@ -435,12 +435,16 @@ class MyFitness(FitnessFunc):
         # Invoke empirical function from Scargle 2012 
         self.ncp_prior = self.p0_prior(N)
         
+        #actual times
+        self.mjd = np.concatenate([df.t.values, [max(df.t.values)+1]] ) # put one at the end 
+        self.setup()
+        
+    def setup(self):
+        df = self.df
         # counts per cell
         self.nn = df.counts.values 
         assert min(self.nn)>0, 'Attempt to Include a cell with no contents'
 
-        #actual times
-        self.mjd = np.concatenate([df.t.values, [max(df.t.values)+1]] ) # put one at the end 
         
         # edges and block_length use exposure as "time"
         fexp = df.fexp.values
@@ -471,7 +475,7 @@ class MyFitness(FitnessFunc):
         Returns
         -------
         edges : ndarray
-            array containing the (M+1) edges defining the M optimal bins
+            array containing the (M+1) edges, in MJD units, defining the M optimal bins
         """
         # This is the basic Scargle algoritm, copied almost verbatum
         # ---------------------------------------------------------------
@@ -510,25 +514,64 @@ class MyFitness(FitnessFunc):
             ind = last[ind - 1]
         change_points = change_points[i_cp:]
 
-        exp_edges =  self.edges[change_points]
-
-        # convert from exposure edges to equivalent MJD values
-        mjd_index = np.searchsorted(self.edges, exp_edges)
-        mjd_edges = self.mjd[mjd_index]
-        return mjd_edges
+        return self.mjd[change_points]
     
+#         edges =  self.edges[change_points]
+
+#         # convert from exposure edges to equivalent MJD values
+#         mjd_index = np.searchsorted(self.edges, exp_edges)
+#         mjd_edges = self.mjd[mjd_index]
+#         return mjd_edges
+
+class LikelihoodFitness(CountFitness):
+    
+    def __init__(self, cell_df, p0=0.05,):
+        super().__init__(cell_df, p0)
+        
+    def setup(self):
+        df = self.df
+        N = self.N
+        cnpt = df.dom[0][-1]
+        self.cdom = np.empty((N, cnpt))
+        self.ccod = np.empty((N, cnpt))
+        for i in range(N):
+            self.cdom[i]=np.linspace(*df.dom[i])
+            self.ccod[i]=df.cod[i]
+
+    def __call__(self, R, npt=100):
+
+        x = np.linspace(self.cdom[R][0], self.cdom[R][-1], npt)
+        y = np.zeros(npt)
+        rv = np.empty(R+1)
+        for i in range(R, -1, -1): 
+            y += np.interp(x, self.cdom[i], self.ccod[i])
+            amax = np.argmax(y)
+            rv[i] =y[amax]
+        return rv    
+
     
 class BayesianBlocks(object):
+    """Perform Bayesian Block analysis of the cells found in a light curve
     """
-    """
-    def __init__(self, lc, verbose=1):
+    defaults=(
+        ('verbose', 1, 'verbosity'),
+        ('fitness_func', 'counts', 'Type of fitness function to use'),
+        ('func_names', 'counts likelihood'.split(), 'allowed functions'),
+        ('func_classes', [CountFitness, LikelihoodFitness], 'implemented classes'),
+    )
+    
+    @keyword_options.decorate(defaults)
+    def __init__(self, lc, fitness_func=None, **kwargs):
         """
         lc : a  LIghtCurve object with a DataFrame
         """
- 
+        keyword_options.process(self,kwargs)
         self.data = lc.data
         self.cells = lc.dataframe
         self.verbose = self.data.verbose
+        self.fitness_func = dict(zip(self.func_names, self.func_classes)).get(fitness_func, None)
+        if self.fitness_func is None:
+            raise Exception(f'Valid names for fitness_func are: {self.func_names}')
           
     def partition(self, p0=0.05, **kwargs):
         """
@@ -537,12 +580,12 @@ class BayesianBlocks(object):
         """
                  
         # Now run the astropy Bayesian Blocks code using my version of the 'event' model
-        fitness = MyFitness(self.cells)
+        fitness = self.fitness_func(self.cells)
         edges = fitness.fit() 
         
         if self.verbose>0:
             print(f'Partitioned {fitness.N} cells into {len(edges)-1} blocks, with prior {fitness.ncp_prior:.1f}\n'\
-                  f' Used FitnessFunc class {MyFitness} ' )
+                  f' Used FitnessFunc class {self.fitness_func} ' )
         
         return self.data.binned_weights(edges)
         

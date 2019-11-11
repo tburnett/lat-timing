@@ -94,7 +94,8 @@ class TimedData(object):
         Parameter:
             bins : None | float | array
                 if None, use defaults
-                Otherwise an array of bin edges
+                Otherwise an array of MJD bin edges
+                
         Returns: a BinnedWeight object for access to each set of binned weights
             The object can be indexed, or used in a for loop
             bw[i] returns a  dict (t, tw, fexp, w, S, B)
@@ -104,8 +105,7 @@ class TimedData(object):
                   w   : array of weights for the time range
                   S,B : predicted source, background counts for this bin
             """
-        return BinnedWeights(self, bins)
-     
+        return BinnedWeights(self, bins)     
 
     def get_binned_exposure(self, time_bins):
 

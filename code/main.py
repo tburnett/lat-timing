@@ -95,7 +95,7 @@ class Main(object):
         bins: a list of bin edges | None
             if None use default
         """
-        if bins is None: # use cached version
+        if bins is None and len(kwargs)==0: # set or use cached version unless new bins or a kwarg
             if not hasattr(self, 'basic_lc'):
                 self.basic_lc = LightCurve(self.binned_weights(bins), **kwargs)
             return self.basic_lc
@@ -105,6 +105,10 @@ class Main(object):
         """
         lc : LightCurve object or None
             initial, presumably regular, binning to be used. If None, use default 
+            bb_kwargs : dict
+                parameters to pass to the BayesianBlocks class, especially fitness_func
+            kwargs:
+                parameter to psss for the light curve
         """
         bb = BayesianBlocks(lc or self.light_curve(), **bb_kwargs)
         edges = bb.partition()
