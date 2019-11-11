@@ -101,7 +101,7 @@ class Main(object):
             return self.basic_lc
         return LightCurve(self.binned_weights(bins), **kwargs)
 
-    def bayesian_blocks(self, lc=None, bb_kwargs={}, **kwargs):
+    def bayesian_blocks(self, lc=None, lc_kwargs={}, **kwargs):
         """
         lc : LightCurve object or None
             initial, presumably regular, binning to be used. If None, use default 
@@ -110,11 +110,11 @@ class Main(object):
             kwargs:
                 parameter to psss for the light curve
         """
-        bb = BayesianBlocks(lc or self.light_curve(), **bb_kwargs)
+        bb = BayesianBlocks(lc or self.light_curve(), **kwargs)
         edges = bb.partition()
-        dkw = dict(rep='poisson', min_exp=0.01)
-        dkw.update(kwargs)
-        return bb.light_curve(edges, **dkw)
+        lckw = dict(rep='poisson', min_exp=0.01)
+        lckw.update(lc_kwargs)
+        return bb.light_curve(edges, **lckw)
     
 
     def plot_time(self, radius_max=2, delta_t=2, xlim=None):

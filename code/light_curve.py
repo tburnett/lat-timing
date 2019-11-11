@@ -227,6 +227,14 @@ class PoissonRep(object):
     def ts(self):
         return self.poiss.ts
     
+    def create_table(self, npts=100, support=1e-6):
+        # make a table of evently-spaced points between limits
+        p = self.fit['poiss']
+        a,b = p.cdfinv(support), p.cdfcinv(support)
+        dom=(a,b,npts)
+        cod = np.array(list(map(p, np.linspace(*dom)))) .astype(np.float32)
+        return dom, cod
+    
     def comparison_plots(self, xlim=(0,1), ax=None, nbins=40):
         """Plots comparing this approximation to the actual likelihhod
         """
@@ -260,13 +268,7 @@ class PoissonRepTable(PoissonRep):
         self.fit['dom']=dom
         self.fit['cod']=cod.astype(np.float32)
         
-    def create_table(self, npts=100, support=1e-6):
-        # make a table of evently-spaced points between limits
-        p = self.fit['poiss']
-        a,b = p.cdfinv(support), p.cdfcinv(support)
-        dom=(a,b,npts)
-        cod = np.array(list(map(p, np.linspace(*dom)))) .astype(np.float32)
-        return dom, cod
+
         
         
 class LightCurve(object):
@@ -339,6 +341,33 @@ class LightCurve(object):
         """return the summary DataFrame
         """
         return self.fit_df
+    
+    def create_tables(self, npts=100, support=1e-6):
+        """ create a set of tables representing the log-likelihoods of the cells
+        parameters:
+            npts : integer
+                number of points
+            support : float
+                Integral of the Likelihood PDF to discard on each end
+            
+        returns 
+            arrays for points and log-likelihood values as (N, npts) arraays
+        """
+        assert self.rep.startswith('poisson'), 'Need a Poisson rep to calculate tables'
+        df = self.dataframe
+        dom = np.empty((len(df), npts), np.float32)
+        cod = np.empty((len(df), npts), np.float32)
+
+        def create_table(poiss):
+            # make a table of evently-spaced points between limits
+            a,b = poiss.cdfinv(support), poiss.cdfcinv(support)
+            x = np.linspace(a,b,npts).astype(np.float32)
+            y = np.array(list(map(poiss, x))) .astype(np.float32)
+            return x, y
+
+        for i,poiss in enumerate(df.poiss.values):
+            dom[i], cod[i] = create_table(poiss)
+        return dom, cod
     
     def flux_plot(self, ts_max=9, xerr=0.5, title=None, ax=None, **kwargs): 
         """Make a plot of flux with according to the representation
@@ -425,12 +454,13 @@ class CountFitness(FitnessFunc):
     
     """
     
-    def __init__(self, cell_df, p0=0.05,):
-        """cell_df : a DataFrame, including exposure (fexp) and counts (counts), 
+    def __init__(self, lc, p0=0.05,):
+        """lc  : a LightCurbe object, includeing DataFrame, including exposure (fexp) and counts (counts), 
             as well as a representation of the likelihood for each cell
         """
         self.p0=p0
-        self.df=df=cell_df 
+        self.lc = lc
+        self.df=df=lc.dataframe
         N = self.N = len(df)
         # Invoke empirical function from Scargle 2012 
         self.ncp_prior = self.p0_prior(N)
@@ -515,28 +545,27 @@ class CountFitness(FitnessFunc):
         change_points = change_points[i_cp:]
 
         return self.mjd[change_points]
+
     
-#         edges =  self.edges[change_points]
-
-#         # convert from exposure edges to equivalent MJD values
-#         mjd_index = np.searchsorted(self.edges, exp_edges)
-#         mjd_edges = self.mjd[mjd_index]
-#         return mjd_edges
-
 class LikelihoodFitness(CountFitness):
+    """ Fitness function that uses the full likelihood
+    """
     
-    def __init__(self, cell_df, p0=0.05,):
-        super().__init__(cell_df, p0)
+    def __init__(self, lc, p0=0.05,):
+        super().__init__(lc, p0)
         
     def setup(self):
         df = self.df
         N = self.N
-        cnpt = df.dom[0][-1]
-        self.cdom = np.empty((N, cnpt))
-        self.ccod = np.empty((N, cnpt))
-        for i in range(N):
-            self.cdom[i]=np.linspace(*df.dom[i])
-            self.ccod[i]=df.cod[i]
+        if 'dom' in df.columns:
+            cnpt = df.dom[0][-1]
+            self.cdom = np.empty((N, cnpt))
+            self.ccod = np.empty((N, cnpt))
+            for i in range(N):
+                self.cdom[i]=np.linspace(*df.dom[i])
+                self.ccod[i]=df.cod[i]
+        else:
+            self.cdom, self.ccod = self.lc.create_tables()
 
     def __call__(self, R, npt=100):
 
@@ -563,13 +592,15 @@ class BayesianBlocks(object):
     @keyword_options.decorate(defaults)
     def __init__(self, lc, fitness_func=None, **kwargs):
         """
-        lc : a  LIghtCurve object with a DataFrame
+        lc : a  LIghtCurve object with a DataFrame, whcih which must have "poiss" column
         """
         keyword_options.process(self,kwargs)
+        self.lc = lc
         self.data = lc.data
         self.cells = lc.dataframe
+        assert 'poiss' in self.cells.columns, 'Expect the dataframe ho have the Poisson representation'
         self.verbose = self.data.verbose
-        self.fitness_func = dict(zip(self.func_names, self.func_classes)).get(fitness_func, None)
+        self.fitness_func = dict(zip(self.func_names, self.func_classes)).get(fitness_func, self.func_classes[0])
         if self.fitness_func is None:
             raise Exception(f'Valid names for fitness_func are: {self.func_names}')
           
@@ -580,7 +611,7 @@ class BayesianBlocks(object):
         """
                  
         # Now run the astropy Bayesian Blocks code using my version of the 'event' model
-        fitness = self.fitness_func(self.cells)
+        fitness = self.fitness_func(self.lc)
         edges = fitness.fit() 
         
         if self.verbose>0:
