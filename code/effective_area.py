@@ -25,7 +25,9 @@ class EffectiveArea(object):
             self.CALDB=os.environ['CALDB']
  
         ##cdbm = pycaldb.CALDBManager(self.irf)
-        aeff_file = f'{self.CALDB}/data/glast/lat/bcf/ea/aeff_{self.irf}_FB.fits'
+        if os.path.exists(f'{self.CALDB}/data' ):
+            self.CALDB+='/data'
+        aeff_file = f'{self.CALDB}/glast/lat/bcf/ea/aeff_{self.irf}_FB.fits'
         assert os.path.exists(aeff_file), f'Effective area file {aeff_file} not found'
         ct0_file = ct1_file = aeff_file ##cdbm.get_aeff()
         self._read_aeff(ct0_file,ct1_file)

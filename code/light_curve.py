@@ -46,11 +46,12 @@ class LogLike(object):
         
     def __call__(self, pars ):
         """ evaluate the log likelihood 
-
+            pars: array or float
+                if array with len>1, expect (rate, beta)
         """
         pars = np.atleast_1d(pars)
-        if len(pars)>1:      alpha, beta = pars
-        else:                alpha, beta = max(-1, pars[0]-1), 0
+        if len(pars)>1:      alpha, beta = pars - np.array([-1,0])
+        else:                alpha, beta = pars[0]-1, 0
             
         return np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
 
@@ -92,7 +93,7 @@ class LogLike(object):
             a, b, c = np.sum(w**2/Dsq), np.sum(w*(1-w)/Dsq), np.sum((1-w)**2/Dsq)
             return np.array([[a,b], [b,c]])
         
-    def rate(self, fix_beta=True, debug=False, no_ts=False):
+    def rate(self, fix_beta=True, debug=False, no_ts=True):
         """Return signal rate and its error"""
         try:
             s = self.solve(fix_beta )
@@ -101,7 +102,8 @@ class LogLike(object):
             h = self.hessian(s)
         
             v = 1./h[0] if fix_beta else linalg.inv(h)[0,0]
-            ts = None if no_ts else (0 if s[0]<=-1 else 2*(self(s)-self([-1,s[1]])))
+            ts = None if no_ts else (0 if s[0]<=-1 else
+                 2*(self(s)-self( -1 if fix_beta else [-1,s[1]] )))
             return (s[0]), np.sqrt(v), ts
         
         except (LinAlgError, LinAlgWarning, RuntimeWarning) as msg:
@@ -111,22 +113,32 @@ class LogLike(object):
             print(f'exception: {msg}')
         print(9999.)
             
-    def minimize(self,   fix_beta=True,estimate=[0.5,0], **fmin_kw):
+    def minimize(self,   fix_beta=True,estimate=[0.,0], **fmin_kw):
         """Minimize the -Log likelihood """
         kw = dict(disp=False)
         kw.update(**fmin_kw)
         f = lambda pars: -self(pars)
         return optimize.fmin_cg(f, estimate[0:1] if fix_beta else estimate, **kw)
 
-    def solve(self, fix_beta=True, debug=True, estimate=[0.5,0],**fit_kw):
+    def solve(self, fix_beta=True, debug=True, estimate=[0.1,0],**fit_kw):
         """Solve non-linear equation(s) from setting gradient to zero 
         note that the hessian is a jacobian
         """
+
+        if fix_beta:
+            # 
+            g0= self.gradient([0])
+            # solution is at zero flux
+            if g0<=0:
+                return [0]
+            # check that solution close to zero, difficult for fsolve.
+            # if < 0.5 sigma away, just give linear solution  
+            h0=self.hessian(0)[0]
+            if g0/h0 < 0.5*np.sqrt(1/h0): 
+                return [g0/h0]
+       
         kw = dict(factor=2, xtol=1e-3, fprime=self.hessian)
-        kw.update(**fit_kw)
-        if fix_beta and self.gradient([0])<0:
-            # can happen if solution is negatives
-            return [0]
+        kw.update(**fit_kw)        
         try:
             ret = optimize.fsolve(self.gradient, estimate[0] if fix_beta else estimate , **kw)   
         except RuntimeWarning as msg:
@@ -141,24 +153,28 @@ class LogLike(object):
         fig, ax = plt.subplots(figsize=(4,2)) if ax is None else (ax.figure, ax)
 
         dom = np.linspace(*xlim)
-        a, s, ts = self.rate(fix_beta=fix_beta, debug=True)
         if fix_beta:
             f = lambda x: self([x])
             beta=0
         else:
             a, beta = self.solve(fix_beta, debug=True)
-            #assert abs(a-v+1)<1e-6, f'{a},{v}, {a-v+1}'
             f = lambda x: self([x, beta])
         ax.plot(dom, list(map(f,dom)) )
-
-        ax.plot(a, f(a), 'or')
-        ax.plot([a-s, a+s], [f(a-s), f(a+s)], '-k',lw=2)
-        for x in (a-s,a+s):
-            ax.plot([x,x], [f(x)-0.1, f(x)+0.1], '-k',lw=2)
-        ax.plot(a, f(a)-0.5, '-ok', ms=10)
+        
+        try:
+            a, s, ts = self.rate(fix_beta=fix_beta, debug=True)
+            ax.plot(a, f(a), 'or')
+            ax.plot([a-s, a+s], [f(a-s), f(a+s)], '-k',lw=2)
+            for x in (a-s,a+s):
+                ax.plot([x,x], [f(x)-0.1, f(x)+0.1], '-k',lw=2)
+            ax.plot(a, f(a)-0.5, '-ok', ms=10)
+            ax.set(title=title, xlim=xlim, ylim=(f(a)-4, f(a)+0.2), 
+               ylabel='log likelihood', xlabel='flux')        
+        except Exception as msg :
+            print(msg)
+            ax.set(title=' **failed fit**')
         ax.grid()
-        ax.set(title=title, xlim=xlim, ylim=(f(a)-4, f(a)+0.2), 
-               ylabel='log likelihood', xlabel='flux')
+
 
 
 class GaussianRep(object):
@@ -190,7 +206,10 @@ class PoissonRep(object):
     def __init__(self, loglike):
         """loglike: a LogLike object"""
         
-        fmax=max(0, loglike.solve()[0])
+        t = loglike.solve()
+        if t is None:
+            raise Exception('Failed fit?')
+        fmax=max(0, t[0])
         ## NB: the dd=-10 is a kluge for very small limits, set for loglike stuff with different scales.
         # this seems to work, but must be looked at more carefully
         self.pf = poisson.PoissonFitter(loglike, fmax=fmax, dd=-10.)
@@ -303,11 +322,13 @@ class LightCurve(object):
         if self.rep not in self.replist:
             raise Exception(f'Unrecognized rep: "{self.rep}", must be one of {self.replist}')
         repcl = self.rep_class[self.replist.index(self.rep)]
+        
+        #self.fit_df = self.fit(repcl)
         try:
             self.fit_df = self.fit(repcl)
         except Exception as msg:
-            print(f'Fail fit: {msg}')
-            raise Exception(msg)
+            print(f'Fail fit: {msg}; stop here')
+            #raise Exception(msg)
          
     def __repr__(self):
         return f'{self.__class__} {len(self.cells)} cells fit with rep {self.rep}'
@@ -327,7 +348,8 @@ class LightCurve(object):
                 outd[i]=repcl(cell).fit
             except Exception as msg:
                 print(f'{repcl} fail for Index {i}, LogLike {cell}\n   {msg}')
-                raise
+                break
+                #raise
 
         df = pd.DataFrame.from_dict(outd, orient='index', dtype=np.float32)
         if data.verbose>0:
@@ -409,7 +431,7 @@ class LightCurve(object):
         
         #ax.axhline(1., color='grey')
         ax.set(**kw)
-        ax.set_title(title or f'{data.source_name}, rep {self.rep}')
+        ax.set_title(title or f'{self.data.name}, rep {self.rep}')
         ax.grid(alpha=0.5)
         
     def fit_hists(self, title=None, **hist_kw):
@@ -465,8 +487,9 @@ class CountFitness(FitnessFunc):
         # Invoke empirical function from Scargle 2012 
         self.ncp_prior = self.p0_prior(N)
         
-        #actual times
-        self.mjd = np.concatenate([df.t.values, [max(df.t.values)+1]] ) # put one at the end 
+        #actual times for bin edges
+        dt = df.tw[0]/2 # assum all the same
+        self.mjd = np.concatenate([df.t.values-dt, [df.t.values[-1]+dt]] ) # put one at the end 
         self.setup()
         
     def setup(self):
@@ -565,7 +588,7 @@ class LikelihoodFitness(CountFitness):
                 self.cdom[i]=np.linspace(*df.dom[i])
                 self.ccod[i]=df.cod[i]
         else:
-            self.cdom, self.ccod = self.lc.create_tables()
+            self.cdom, self.ccod = self.lc.create_tables(npts=200, support=2e-9)
 
     def __call__(self, R, npt=100):
 
@@ -573,7 +596,7 @@ class LikelihoodFitness(CountFitness):
         y = np.zeros(npt)
         rv = np.empty(R+1)
         for i in range(R, -1, -1): 
-            y += np.interp(x, self.cdom[i], self.ccod[i])
+            y += np.interp(x, self.cdom[i], self.ccod[i], left=-np.inf, right=-np.inf)
             amax = np.argmax(y)
             rv[i] =y[amax]
         return rv    

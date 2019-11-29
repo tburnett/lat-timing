@@ -67,7 +67,7 @@ def process(self, kwargs, defaults=None):
     Raises KeyError exception for any kwargs entry not in the defaults list
     """
     for item in self.defaults if defaults is None else defaults:
-        if type(item)==bytes: continue
+        if type(item)==bytes or type(item)==str: continue #label for doc
         self.__dict__[item[0].strip()] = item[1]
         
     for key in list(kwargs.keys()):
@@ -116,7 +116,7 @@ def current_parameter_table(self, indent = '\n', hbar=60*'='):
     """
     s= hbar+ indent+self.__class__.__name__+'  parameters'+ indent+hbar
     for item in self.defaults:
-        if type(item)==bytes:
+        if type(item)==bytes or type(item)==str:
             s+= '\n%s%s    %s'% (indent,10*'=',item.upper())
             continue
         if len(item)==3:

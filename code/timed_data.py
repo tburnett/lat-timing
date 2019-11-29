@@ -12,7 +12,6 @@ import matplotlib.pyplot as plt
 from astropy.time import Time, TimeDelta
 from astropy.coordinates import SkyCoord
 import keyword_options
-import exposure
 
 mission_start = Time('2001-01-01T00:00:00', scale='utc')
 day = 24*3600
@@ -123,8 +122,7 @@ class TimedData(object):
             galactic=(self.l,self.b), 
             radius=self.radius,
             time_data=self.df.to_records(index=False),
-        )
-        
+        )        
         pickle.dump(out, open(filename, 'wb'))
 
     def plot_time(self, delta_max=2, delta_t=2, xlim=None):

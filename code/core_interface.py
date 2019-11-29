@@ -11,7 +11,7 @@ class CoreInterface(object):
     """Simple interface to the Kerr code in godot.core
     """
     
-    def __init__(self, binned_weights, min_exp=0.2):
+    def __init__(self, binned_weights, min_exp=0.3):
         """
         parameters:
             binned_weights : a main.BinnedWeights object
@@ -56,48 +56,48 @@ class CoreInterface(object):
     def to_dataframe(self, rvals):
         """convert the rvals array, with shape (N,5) to a dataframe
         columns are:
-            time: value in MJD
-            dt: bin width
-            rate : relative rate or 95% CL limit if error[1]==-1
-            error: rate error bar unless error[1]==-1
+            t: value in MJD
+            tw: bin width
+            flux : relative rate or 95% CL limit if error[1]==-1
+            errors: 2-tuple flux error or (0,-1) 
         """
         rvt = rvals.T
         return pd.DataFrame.from_dict(
                     dict(
-                         time=rvt[0], 
-                         dt=rvt[1], 
-                         rate=rvt[2].round(4),
-                         error=[ tuple(u) for u in rvals[:,3:].round(4)],
+                         t=rvt[0], 
+                         tw=2*rvt[1], 
+                         flux=rvt[2].round(4),
+                         errors=[ tuple(u) for u in rvals[:,3:].round(4)],
                         )  
                       )
 
     
-    def bb_lightcurve(self, dataframe=True, *pars):
+    def bb_lightcurve(self, dataframe=True, **pars):
         """ Return a Bayesian blocks flux density light curve
         pars:
             tsmin=4, plot_years=False, plot_phase=False, bb_prior=8
         """
-        rvals =  self.cll.get_bb_lightcurve(*pars)
+        rvals =  self.cll.get_bb_lightcurve(**pars)
         if not dataframe: return rvals
         return self.to_dataframe(rvals)
     
-    def lightcurve(self, dataframe=True, *pars):
+    def lightcurve(self, dataframe=True, **pars):
         """Return a flux density light curve for the raw cells.
         
         pars:
             tsmin=4, plot_years=False, plot_phase=False,  get_ts=False
         """
-        rvals = self.cll.get_lightcurve(*pars)
+        rvals = self.cll.get_lightcurve(**pars)
         if not dataframe: return rvals
         return self.to_dataframe(rvals)
     
-    def plot_bb(self, *pars):
+    def plot_bb(self, **pars):
         """tsmin=4,fignum=2,clear=True,color='C3',
             plot_raw_cells=True,bb_prior=4,plot_years=False,
             no_bb=False,log_scale=False,
             plot_phase=False,ax=None
         """
-        return self.cll.plot_cells_bb(*pars)
+        return self.cll.plot_cells_bb(**pars)
     
-    def plot_lc(self, *pars):
-        return self.cll.plot_clls_lc(*pars)
+    def plot_lc(self, **pars):
+        return self.cll.plot_clls_lc(**pars)

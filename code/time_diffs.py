@@ -118,9 +118,10 @@ class TimeDiff(object):
                 
             fig.suptitle('Processing: window size={}, max_freq={}'.format(
                 window_size, max_freq),  ha='right')
+            fig.set(facecolor='white')
 
 
     def list_parameters(self):
-        """ a printable table of the current paramters and values"""
+        """ a printable table of the current parameters and values"""
         return keyword_options.current_parameter_table(self)
 
