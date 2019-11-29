@@ -72,7 +72,12 @@ class TimedData(object):
         self.photon_data =self._check_photons(self.exposure, photon_data)      
         self.time_bins = self._default_bins()
         self.binned_exposure = self.get_binned_exposure(self.time_bins)
-
+           
+    def __repr__(self):
+        b = self.time_bins
+        return  f'{self.__class__}: for source {self.source_name}'\
+                f'   {len(b)} intervals from {b[0]:.1f} to {b[-1]:.1f}'\
+    
     def _default_bins(self):
         #set up default bins from exposure; adjust stop to come out even
         # round to whole day
@@ -462,17 +467,14 @@ class TimedData(object):
                 return np.bitwise_and(x,1).astype(bool)
 
             def __repr__(self):
-                return f'{self.__class__.__name__} MjD range: {self.g[0]:.2f}-{self.g[-1]:.2f}, good fraction {self.fraction:.2f} '
+                return  f'{self.__class__.__name__} MjD range: {self.g[0]:.2f}-{self.g[-1]:.2f}'\
+                        f', good fraction {self.fraction:.2f} '
 
         gti =  GTI(start[sel],stop[sel], self.ignore_gti)
         if self.verbose>1:
             print(f'\t{gti}')
         return gti
-           
-    def __repr__(self):
-        return f'''{self.__class__}:  
-        {len(self.fexposure)} intervals from {self.bins[0]:.1f} to {self.bins[-1]:.1f} for source {self.source_name}
-        S {self.S:.2f}  B {self.B:.2f} '''
+
 
     def __getitem__(self, i):
         """ get info for ith time bin and return dict with time, exposure, weights and S,B value
