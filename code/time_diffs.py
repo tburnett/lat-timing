@@ -24,8 +24,8 @@ class TimeDiff(object):
         ('signal_count', 25,   'average number of counts per cycle'),
 
         'Analysis',
-        ('window_size' , 400,  'window size in days'),
-        ('max_freq'    , 0.1,  'maximum frequency day**-1'),
+        ('window_size' , 100,  'window size in days'),
+        ('max_freq'    , 0.05,  'maximum frequency day**-1'),
 
         'Processing options',
         ('make_plots',  True, 'generate plots for all steps'),
@@ -43,7 +43,7 @@ class TimeDiff(object):
         self.simulated = dataset is None
         self.dataset = self.simulate() if self.simulated else dataset 
 
-        if 'weight' not in self.dataset.columns: self.use_weights=False
+        self.use_weights = 'weight' in self.dataset.columns
         if self.make_plots:
             plt.rc('font', size=12)
             
@@ -73,7 +73,7 @@ class TimeDiff(object):
 
         return pd.DataFrame([time_data], index=['time']).T
 
-    def __call__(self, window_size=None, max_freq=None):
+    def __call__(self, window_size=None, max_freq=None, **kwargs):
         """ Run the time-differencing, then FFT
         """
         
@@ -83,7 +83,9 @@ class TimeDiff(object):
         fft_size = 2 * int(np.floor(window_size * max_freq))
 
         # generate time differences
-        time_data=self.dataset.time.values 
+        time_data=self.dataset.time.values
+        if self.use_weights:
+            weights = self.dataset.weight.values
         td = np.zeros(fft_size)
         for i1,t1 in enumerate(time_data):
             b = np.searchsorted(time_data, ( t1+window_size))
@@ -97,28 +99,37 @@ class TimeDiff(object):
         power =np.square(np.absolute(output_array)) / norm
 
         if self.make_plots:
-            fig,(ax1,ax2) = plt.subplots(2,1, figsize=(10,8), gridspec_kw=dict(
-                hspace=0.3,top=0.92,left=0.05)  )
             
-            time_bin = window_size/fft_size
-            times=np.linspace(0.5, fft_size-0.5, fft_size)*time_bin
-            ax1.plot(times, td, '+');
-            ax1.grid(alpha=0.5);
-            ax1.set(xlabel='time difference [days]', ylim=(0,None), 
-                    ylabel='Entries per {:.1f} day'.format(time_bin))
+            if self.simulation:
+                fig,(ax1,ax2) = plt.subplots(2,1, figsize=(10,8), gridspec_kw=dict(
+                    hspace=0.3,top=0.92,left=0.05)  )
+
+                time_bin = window_size/fft_size
+                times=np.linspace(0.5, fft_size-0.5, fft_size)*time_bin
+                ax1.plot(times, td, '+');
+                ax1.grid(alpha=0.5);
+                ax1.set(xlabel='time difference [days]', ylim=(0,None), 
+                        ylabel='Entries per {:.1f} day'.format(time_bin))
+                fig.suptitle('Processing: window size={}, max_freq={}'.format(
+                    window_size, max_freq),  ha='right')
+            else:
+                fig, ax2 = plt.subplots(1,1, figsize=(8,3))
             
-            deltaf= max_freq/fft_size*2
-            freq = np.linspace(0.5, fft_size/2-0.5, fft_size/2)*deltaf
-            ax2.plot( freq, power[1:], 'o', label='')
-            ax2.grid(alpha=0.5);
-            ax2.set(xlabel='Frequency [1/day]', ylabel='Power',yscale='log')
-            if self.simulated:
-                ax2.axvline(1/self.agn_period, color='red', ls=':', label='simulated frequency')
-                ax2.legend()
-                
-            fig.suptitle('Processing: window size={}, max_freq={}'.format(
-                window_size, max_freq),  ha='right')
-            fig.set(facecolor='white')
+                deltaf= max_freq/fft_size*2
+                freq = np.linspace(0.5, fft_size//2-0.5, fft_size//2)*deltaf
+                ax2.plot( freq, power[1:], 'o', label='')
+                ax2.grid(alpha=0.5);
+                ax2.set(xlabel='Frequency [1/day]', ylabel='Power',yscale='log', **kwargs)
+                ax2.text(0.7,0.8, 
+                         f'window size {window_size}\n'\
+                         f'max_freq    {max_freq}',
+                         fontdict=dict(family='monospace', size=12),
+                         transform=ax2.transAxes)
+                if self.simulated:
+                    ax2.axvline(1/self.agn_period, color='red', ls=':', label='simulated frequency')
+                    ax2.legend()
+
+                fig.set(facecolor='white')
 
 
     def list_parameters(self):

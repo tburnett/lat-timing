@@ -12,6 +12,7 @@ from astropy.coordinates import SkyCoord
 import keyword_options
 
 from data_management import TimedData
+from weightman import WeightedData, WeightModel
 from light_curve import LightCurve, BayesianBlocks
 
 
@@ -26,8 +27,8 @@ class Main(object):
         ('radius',  5, 'cone radius for selection [deg]'),
         ('interval', 2, 'Binning time interval [days]'),
         ('mjd_range', None, 'Range of MJD: default all data'),
-        ('weight_file', None, 'file name to fine weight'),
-
+        ('weight_file', None, 'file name to find weight'),
+        ('fix_weights',  True, 'Set to supplement weights with model' ),
        )
     
     @keyword_options.decorate(defaults)
@@ -42,42 +43,26 @@ class Main(object):
 
         self._set_geometry(name, position)
         self.data = TimedData(self, source_name=name, verbose=self.verbose)
+
+        if self.weight_file is not None:
+            # adds weights from map and replace data object
+            self.data = WeightedData(self.data, self.weight_file, self.fix_weights)
+            if self.fix_weights:
+                if self.verbose>0:
+                    print(f'Creating weight model')
+                df = self.data.photon_data
+                weight_model = WeightModel.from_data(df, plotit=False)
+                tofix = pd.isna(df.weight) | (df.band>13) 
+                fixme= df.loc[tofix,:]
+                fixed = fixme.apply(lambda c: weight_model(c.band, c.radius), axis=1,)  
+                df.loc[tofix, 'weight'] = fixed
+                self.wm = weight_model
+
         self.df = self.data.photon_data
-        
-        if self.weight_file:
-            self._process_weights()
-            
-    def binned_weights(self, bins=None):
-        """ 
-        Parameter:
-            bins : None | float | array
-                if None, use defaults
-                Otherwise an array of bin edges
-        Returns: a BinnedWeight object for access to each set of binned weights
-            The object can be indexed, or used in a for loop
-            bw[i] returns a  dict (t, tw, fexp, w, S, B)
-            where t   : bin center time (MJD)
-                  tw  : bin width in days (assume 1 if not preseent)
-                  fexp: associated fractional exposure
-                  w   : array of weights for the time range
-                  S,B : predicted source, background counts for this bin
-            """
-        return self.data.binned_weights( bins)
 
-    def _process_weights(self):
-        # add the weights to the photon dataframe
-        wtd = self.data.add_weights(self.weight_file)
-        # get info from weights file
-        vals = [wtd[k] for k in 'model_name roi_name source_name source_lb '.split()]
-        lbformat = lambda lb: '{:.2f}, {:.2f}'.format(*lb)
-        self.model_info='\n  {}\n  {}\n  {}\n  {}'.format(vals[0], vals[1], vals[2], lbformat(vals[3]))
-
-        # add a energy band column, filter out photons with NaN         
-        gd = self.data.photon_data
-        gd.loc[:,'eband']=(gd.band.values//2).clip(0,7)
-
-        ok = np.logical_not(pd.isna(gd.weight))
-        self.photons = gd.loc[ok,:]
+    @property
+    def dataframe(self):
+        return self.df
     
     def _set_geometry(self, name, position):
         self.name=name
@@ -97,9 +82,9 @@ class Main(object):
         """
         if bins is None and len(kwargs)==0: # set or use cached version unless new bins or a kwarg
             if not hasattr(self, 'basic_lc'):
-                self.basic_lc = LightCurve(self.binned_weights(bins), **kwargs)
+                self.basic_lc = LightCurve(self.data.binned_weights(bins), **kwargs)
             return self.basic_lc
-        return LightCurve(self.binned_weights(bins), **kwargs)
+        return LightCurve(self.data.binned_weights(bins), **kwargs)
 
     def bayesian_blocks(self, lc=None, lc_kwargs={}, **kwargs):
         """

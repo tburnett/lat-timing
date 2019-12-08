@@ -51,7 +51,7 @@ class LogLike(object):
         """
         pars = np.atleast_1d(pars)
         if len(pars)>1:      alpha, beta = pars - np.array([-1,0])
-        else:                alpha, beta = pars[0]-1, 0
+        else:                alpha, beta = max(-1, pars[0]-1), 0
             
         return np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
 
@@ -347,7 +347,7 @@ class LightCurve(object):
             try:
                 outd[i]=repcl(cell).fit
             except Exception as msg:
-                print(f'{repcl} fail for Index {i}, LogLike {cell}\n   {msg}')
+                print(f'{self.__class__}, {repcl} fail for Index {i}, LogLike {cell}\n   {msg}')
                 break
                 #raise
 
@@ -431,7 +431,7 @@ class LightCurve(object):
         
         #ax.axhline(1., color='grey')
         ax.set(**kw)
-        ax.set_title(title or f'{self.data.name}, rep {self.rep}')
+        ax.set_title(title or f'{self.data.source_name}, rep {self.rep}')
         ax.grid(alpha=0.5)
         
     def fit_hists(self, title=None, **hist_kw):

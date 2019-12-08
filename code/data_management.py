@@ -15,7 +15,11 @@ from effective_area import EffectiveArea
 from binner import BinnedWeights
 import keyword_options
 
-mission_start = Time('2001-01-01T00:00:00', scale='utc').mjd
+#mission_start = Time('2001-01-01T00:00:00', scale='utc').mjd
+# From a FT2 file header
+# MJDREFI =               51910. / Integer part of MJD corresponding to SC clock S
+# MJDREFF =  0.00074287037037037 / Fractional part of MJD corresponding to SC cloc
+mission_start = 51910.00074287037
 day = 24*3600.
 first_data=54683
 
@@ -56,6 +60,8 @@ class TimedData(object):
     @keyword_options.decorate(defaults)
     def __init__(self, setup, **kwargs):
         """
+        setup : a dict with
+        source_name, 
         """
         keyword_options.process(self,kwargs)
         self.__dict__.update(setup.__dict__) # copy stuff from client
@@ -70,11 +76,11 @@ class TimedData(object):
 
         # set up DataFrame with all photons, and default binning
         self.photon_data =self._check_photons(self.exposure, photon_data)      
-        self.time_bins = self._default_bins()
-        self.binned_exposure = self.get_binned_exposure(self.time_bins)
+        self.edges = self._default_bins()
+        self.binned_exposure = self.get_binned_exposure(self.edges)
            
     def __repr__(self):
-        b = self.time_bins
+        b = self.edges
         return  f'{self.__class__}: for source {self.source_name}'\
                 f'   {len(b)} intervals from {b[0]:.1f} to {b[-1]:.1f}'\
     
@@ -94,6 +100,21 @@ class TimedData(object):
                   f'in range ({time_bins[0]:.1f}, {time_bins[-1]:.1f})')
         return time_bins 
 
+    def _process_weights(self):
+        # add the weights to the photon dataframe
+        wtd = self.add_weights(self.weight_file)
+        # get info from weights file
+        vals = [wtd[k] for k in 'model_name roi_name source_name source_lb '.split()]
+        lbformat = lambda lb: '{:.2f}, {:.2f}'.format(*lb)
+        self.model_info='\n  {}\n  {}\n  {}\n  {}'.format(vals[0], vals[1], vals[2], lbformat(vals[3]))
+
+        # add a energy band column, filter out photons with NaN         
+        gd = self.photon_data
+        gd.loc[:,'eband']=(gd.band.values//2).clip(0,7)
+
+        ok = np.logical_not(pd.isna(gd.weight))
+        self.photons = gd.loc[ok,:]
+        
     def binned_weights(self, bins=None):
         """ 
         Parameter:
@@ -143,6 +164,8 @@ class TimedData(object):
 
         if self.verbose>0:
             print(f'Adding weights from file {os.path.realpath(filename)}')
+            pos = wtd['source_lb']
+            print(f'Found weights for {wtd["source_name"]} at ({pos[0]:.2f}, {pos[1]:.2f})')
         # extract pixel ids and nside used
         wt_pix   = wtd['pixels']
         nside_wt = wtd['nside']
@@ -164,6 +187,8 @@ class TimedData(object):
         bad = np.logical_not(np.isin(shifted_pix, wt_pix)) 
         if self.verbose>0:
             print(f'\t{sum(bad)} / {len(bad)} photon pixels are outside weight region')
+        if sum(bad)==len(bad):
+            raise Exception('No weights found')
         shifted_pix[bad] = 12*nside_wt**2 # set index to be beyond pixel indices
 
         # find indices with search and add a "weights" column
@@ -235,8 +260,6 @@ class TimedData(object):
             ta,tb = df.iloc[0].time, df.iloc[-1].time
             print(f'\tDates: {UTC(ta):16} - {UTC(tb)}'\
                 f'\n\tMJD  : {ta:<16.1f} - {tb:<16.1f}')  
-
-
         return df 
 
     def _load_photon_data(self, filename, gti):
@@ -477,19 +500,20 @@ class TimedData(object):
 
 
     def __getitem__(self, i):
-        """ get info for ith time bin and return dict with time, exposure, weights and S,B value
+        """ get info for ith time bin and return number
+       
         """
-        k = self.edges        
-        wts = self.weights[k[i]:k[i+1]]
-        exp=self.fexposure[i]
+#         k = self.edges       
+#         wts = self.weights[k[i]:k[i+1]]
+#         exp=self.fexposure[i]
 
-        return dict(
-                t=self.bin_centers[i], # time
-                exp=exp*self.N,        # exposure as a fraction of mean, for filtering
-                w=wts,
-                S= exp*self.S,
-                B= exp*self.B,               
-                )
+#         return dict(
+#                 t=self.bin_centers[i], # time
+#                 exp=exp*self.N,        # exposure as a fraction of mean, for filtering
+#                 w=wts,
+#                 S= exp*self.S,
+#                 B= exp*self.B,               
+#                 )
 
     def __len__(self):
         return self.N
@@ -516,3 +540,11 @@ class TimedData(object):
             ax.grid(alpha=0.5)
         axx[-1].set(xlabel='MJD')
         fig.suptitle(self.source_name)
+        
+def testdata(**kwargs):
+    class Setup(object):
+        def __init__(self, **d):
+            self.__dict__.update(d)
+    setup = Setup(source_name='Geminga', l=195.134, b=4.266, interval=1, mjd_range=None)
+    setup.__dict__.update(**kwargs)
+    return TimedData(setup)

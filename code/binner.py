@@ -39,20 +39,22 @@ class EnergyBinner(CellBinner):
         
         
 class BinnedWeights(object):
-    """ Generate a list of cells, with access to weights"""
+    """ Generate a list of cells, with access to cell data
+        weights
+    """
     
     def __init__(self, data, bins=None):
         """
         Use time binning and data (a TimedData) object to generate list of cells
         """
         self.data = data 
-        self.source_name = data.name
+        self.source_name = data.source_name
         self.verbose = data.verbose
         
         if bins is None:
             # get predefined bin data and corresponding fractional exposure
             # (this case using default step, range) 
-            bins = data.time_bins
+            bins = data.edges
         elif np.isscalar(bins):
             # scalar is step
             step = bins
@@ -71,18 +73,23 @@ class BinnedWeights(object):
         self.fexposure = exposure/np.sum(exposure)   
 
         # get the photon data with good weights, not NaN
-        w = data.photon_data.weight
-        good = np.logical_not(np.isnan(w))
-        self.photons = data.photon_data.loc[good]
-
+        if 'weight' in data.photon_data:
+            w = data.photon_data.weight
+            good = np.logical_not(np.isnan(w))
+            self.photons = data.photon_data.loc[good]
+            self.weights = w = self.photons.weight.values
+            # estimates for total signal and background
+            self.S = np.sum(w)
+            self.B = np.sum(1-w)
+        else:
+            # no weights specified
+            self.photons = data.photon_data
+            self.S = self.B = 0
+            self.weights=[]
+            
         # use photon times to get indices of bin edges
-        self.weights = w = self.photons.weight.values
         self.edges = np.searchsorted(self.photons.time, self.bins)
         
-        # estimates for total signal and background
-        self.S = np.sum(w)
-        self.B = np.sum(1-w)
-
         
     def __repr__(self):
         return f'''{self.__class__}:  
@@ -91,12 +98,21 @@ class BinnedWeights(object):
 
     def __getitem__(self, i):
         """ get info for ith time bin and return dict with 
-            time, bin width, exposure as fraction of total, 
-            weights 
-            S,B value
+            t : MJD
+            tw: bin width, 
+            fexp: exposure as fraction of total, 
+            n : number of photons in bin
+            w : weights 
+            S,B:  value
         """
         k   = self.edges        
-        wts = self.weights[k[i]:k[i+1]]
+        if len(self.weights)==0: 
+            # No weights
+            wts = []
+            n = len(self.photons[k[i]:k[i+1]])
+        else:
+            wts = self.weights[k[i]:k[i+1]]
+            n = len(wts)
         exp = self.fexposure[i]
         tw  = self.bins[i+1]-self.bins[i]
 
@@ -104,6 +120,7 @@ class BinnedWeights(object):
                 t=self.bin_centers[i], # time
                 tw = tw,  # bin width
                 fexp=exp*self.N, # exposure as a fraction of mean, for filtering
+                n=n, # number of photons in bin
                 w=wts,
                 S= exp*self.S,
                 B= exp*self.B,               
@@ -113,22 +130,30 @@ class BinnedWeights(object):
         return self.N
 
     def test_plots(self):
-        """Make a set of plots of exposure, counts, properties of weights
+        """Make a set of plots of exposure, counts, properties of weights, if any
         """
         import matplotlib.pyplot as plt
-        """  plots of properties of the weight distribution"""
-        fig, axx = plt.subplots(5,1, figsize=(12,8), sharex=True,
-                                         gridspec_kw=dict(hspace=0,top=0.95),)
+
+        has_weights = len(self.weights)>0
+        fig, axx = plt.subplots( 5 if has_weights else 3, 1, 
+                    figsize=(12,10 if has_weights else 6), 
+                    sharex=True,
+                    gridspec_kw=dict(hspace=0,top=0.95),)
         times=[]; vals = []
+
         for cell in self:
-            t, e, w = [cell[q] for q in 't exp w'.split()]
+            t, e, n, w = [cell[q] for q in 't fexp n w'.split()]
             if e==0:
                 continue
             times.append(t)
-            vals.append( (e, len(w), len(w)/e , w.mean(), np.sum(w**2)/sum(w)))
+            v =  [e, n, n/e ]
+            if has_weights:
+                v= v + [ w.mean(), np.sum(w**2)/sum(w)]
+            vals.append(v)
         vals = np.array(vals).T
-        for ax, v, ylabel in zip(axx, vals,
-                            ['rel exp','counts','count rate', 'mean weight', 'rms/mean weight']):
+        labels =  ['rel exp','counts','count rate']
+        if has_weights: labels = labels +  ['mean weight', 'rms/mean weight']
+        for ax, v, ylabel in zip(axx, vals,labels):
             ax.plot(times, v, '+b')
             ax.set(ylabel=ylabel)
             ax.grid(alpha=0.5)
