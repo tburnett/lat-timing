@@ -157,7 +157,7 @@ class WeightModel(object):
         # exponential interpolation: b at 1 to c at 2
         alpha=np.log(c/b)
         beta = b**2/c
-        return beta*np.exp(alpha*sr)
+        return min(0.99, beta*np.exp(alpha*sr)) # prevent from being 1 or greater
     
     def __repr__(self):
         import pandas as pd

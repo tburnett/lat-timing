@@ -4,7 +4,7 @@
 import numpy as np
 import pylab as plt
 import pandas as pd
-import os, sys
+import os, sys, pickle
 
 from scipy import (optimize, linalg)
 from scipy.linalg import (LinAlgError, LinAlgWarning)
@@ -53,7 +53,11 @@ class LogLike(object):
         if len(pars)>1:      alpha, beta = pars - np.array([-1,0])
         else:                alpha, beta = max(-1, pars[0]-1), 0
             
-        return np.sum( np.log(1 + alpha*self.w + beta*(1-self.w) )) - alpha*self.S - beta*self.B
+        tmp =  1 + alpha*self.w + beta*(1-self.w)  
+        # limit alpha
+        tmp[tmp<=1e-6]=1e-6
+  
+        return np.sum( np.log(tmp)) - alpha*self.S - beta*self.B
 
     def __repr__(self):
         return f'{self.__class__.__module__}.{self.__class__.__name__}:'\
@@ -93,7 +97,7 @@ class LogLike(object):
             a, b, c = np.sum(w**2/Dsq), np.sum(w*(1-w)/Dsq), np.sum((1-w)**2/Dsq)
             return np.array([[a,b], [b,c]])
         
-    def rate(self, fix_beta=True, debug=False, no_ts=True):
+    def rate(self, fix_beta=True, debug=False, no_ts=False):
         """Return signal rate and its error"""
         try:
             s = self.solve(fix_beta )
@@ -111,7 +115,8 @@ class LogLike(object):
                 print(f'Fit error, cell {self},\n\t{msg}')
         except Exception as msg:
             print(f'exception: {msg}')
-        print(9999.)
+            raise
+        print( '***********Failed?')
             
     def minimize(self,   fix_beta=True,estimate=[0.,0], **fmin_kw):
         """Minimize the -Log likelihood """
@@ -203,16 +208,23 @@ class PoissonRep(object):
             beta is set to zero (for now)
     """
     
-    def __init__(self, loglike):
+    def __init__(self, loglike, tol=5e-2):
         """loglike: a LogLike object"""
         
-        t = loglike.solve()
-        if t is None:
-            raise Exception('Failed fit?')
-        fmax=max(0, t[0])
+        rate, sig, ts= loglike.rate(no_ts=True)
+#         if t is None:
+#             raise Exception('Failed fit?')
+        fmax=max(0, rate)
         ## NB: the dd=-10 is a kluge for very small limits, set for loglike stuff with different scales.
         # this seems to work, but must be looked at more carefully
-        self.pf = poisson.PoissonFitter(loglike, fmax=fmax, dd=-10.)
+        try:
+            self.pf = poisson.PoissonFitter(loglike, fmax=fmax, scale=sig if rate>0 else 1,  dd=-10., tol=tol)
+        except Exception as msg:
+            print(f'Fail poisson fit for {loglike}: {msg}')
+            with open('failed_loglike.pkl', 'wb') as file:
+                pickle.dump(loglike, file)
+            print('Saved file')
+            raise
         self.loglike = loglike
         self.poiss=self.pf.poiss
         p = self
@@ -324,11 +336,11 @@ class LightCurve(object):
         repcl = self.rep_class[self.replist.index(self.rep)]
         
         #self.fit_df = self.fit(repcl)
-        try:
-            self.fit_df = self.fit(repcl)
-        except Exception as msg:
-            print(f'Fail fit: {msg}; stop here')
-            #raise Exception(msg)
+#         try:
+        self.fit_df = self.fit(repcl)
+#         except Exception as msg:
+#             print(f'Fail fit: {msg} ') #'; stop here')
+#             raise Exception(msg)
          
     def __repr__(self):
         return f'{self.__class__} {len(self.cells)} cells fit with rep {self.rep}'
@@ -348,8 +360,7 @@ class LightCurve(object):
                 outd[i]=repcl(cell).fit
             except Exception as msg:
                 print(f'{self.__class__}, {repcl} fail for Index {i}, LogLike {cell}\n   {msg}')
-                break
-                #raise
+                raise
 
         df = pd.DataFrame.from_dict(outd, orient='index', dtype=np.float32)
         if data.verbose>0:

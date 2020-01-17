@@ -42,11 +42,11 @@ class Main(object):
         keyword_options.process(self,kwargs)
 
         self._set_geometry(name, position)
-        self.data = TimedData(self, source_name=name, verbose=self.verbose)
+        self.timedata = TimedData(self, source_name=name, verbose=self.verbose)
 
         if self.weight_file is not None:
             # adds weights from map and replace data object
-            self.data = WeightedData(self.data, self.weight_file, self.fix_weights)
+            self.data = WeightedData(self.timedata, self.weight_file, self.fix_weights)
             if self.fix_weights:
                 if self.verbose>0:
                     print(f'Creating weight model')
@@ -61,8 +61,18 @@ class Main(object):
         self.df = self.data.photon_data
 
     @property
-    def dataframe(self):
+    def photons(self):
         return self.df
+    
+    @property
+    def cells(self, bins=None):
+        """cells according to default binning, as a DataFrame
+        """ 
+        cells=dict()
+        for i,cell in enumerate(self.data.binned_weights(None)):
+            cells[i]= dict(time=cell['t'], n=cell['n'], w=np.array(cell['w']))
+        return pd.DataFrame.from_dict(cells, orient='index'); 
+
     
     def _set_geometry(self, name, position):
         self.name=name

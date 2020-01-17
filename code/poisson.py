@@ -200,19 +200,19 @@ class PoissonFitter(object):
     array([ 50.,   1.,  10.])
     
     """
-    def __init__(self, func, fmax=None, scale=None,  tol=0.20, delta=1e-4, dd=-0.1):
+    def __init__(self, func, fmax=None, scale=None,  tol=0.20, delta=1e-4, dd=-0.1, test_mode=False):
         """
         parameters
         ----------
         func : function of one parameter
         fmax : position of maximum value, or None
-               if None, use fmin 
+               if None, estimate using fmin
         scale: float | None
             estimate for scale to use; if None, estimate from derivatime 
         tol : float
             absolute tolerance in probability amplitude for fit, within default domain out to delta L of 4
         delta : float
-            value to calculate derivative at zero flux
+            value to calculate numerical derivative at zero flux
         """
         self.func = func
         #first check derivative at zero flux - delta is sensitive
@@ -222,6 +222,9 @@ class PoissonFitter(object):
         self.smax = fmax or self.find_max(scale) if s>=0 else 0.
 
         self.ts = 2.*(func(self.smax) - self.f0)
+        
+        if test_mode:
+            return
         # determine values of the function corresponding to delta L of 0.5, 1, 2, 4
         # depending on how peaked the function is, this will be from 5 to 8 
         # The Poisson will be fit to this set of values
@@ -337,10 +340,11 @@ class PoissonFitter(object):
 
     def check(self, tol=0.05):
         offset = self(self.smax)
-        deltas = np.array([np.exp(self.func(x)-offset)-np.exp(self._poiss(x)) for x in self.dom])
+        dom =self.dom[1:] # ignore first on
+        deltas = np.array([np.exp(self.func(x)-offset)-np.exp(self._poiss(x)) for x in dom])
         t = np.abs(deltas).max()
-        if t>tol: raise Exception('PoissonFitter: max dev= {:.2f} > tol= {}. (wprime={:.2f})'
-            .format(t,tol, self.wprime) )
+        if t>tol: 
+            raise Exception(f'PoissonFitter: max dev= {t:.3f} > tol= {tol}. (wprime={self.wprime:.2f})' )
         return t, deltas
     
     def plot(self, ax=None, xticks=True ):
@@ -394,3 +398,58 @@ class PoissonFitter(object):
             summary.update(delta_ts=delta_ts, pull=pull) 
         return summary
 
+class NewFitter(object):
+    """ Determine Poisson parameters for a likelihood function with positive value
+    for maximum
+    Designed for Kerr weighted likelihood, where maximum and sigma are easy to get.
+    """
+    def __init__(self, fun, x0, sig, guess=None):
+        """ fun : function of a variable
+            x0  : maximum
+            sig : sigma at peak
+        """
+        self.fun = fun #loglike = loglike
+
+        self.f, self.sf =  x0, sig 
+        self.guess = guess or [(1/sig)**2,0.3] 
+        self.set_dom()
+        
+    def set_dom(self, default=[-2,-1,1,2]):
+        dom = self.f + self.sf*np.array(default)
+        self.dom = np.array(list(filter(lambda x: x>0, dom)) )
+        self.u = np.array(list(map(self.fun, self.dom))) - self.fun(self.f)
+        
+    def __call__(self,p):
+        """Evaluate sum of squares
+            p : parameters [e,b] 
+        """
+        pois = Poisson([self.f, *p])
+        t = np.array(list(map(pois, self.dom)))
+        return np.sum((t-self.u)**2)
+    
+    def fit(self, **kwargs):
+        fitkw = dict(tol=1e-5)
+        fitkw.update(kwargs)
+        self.fit_info = t= optimize.minimize(self, self.guess, **fitkw )
+        self.poiss = Poisson([self.f,*(t.x)])
+        if t.status:
+            raise Exception(f'Failed fit, {t.message}')
+
+        return self.poiss
+    
+    def plot(self, ax=None, **kwargs):
+        import matplotlib.pylab as plt 
+        fig, ax = plt.subplots() if ax is None else (ax.figure, ax)
+        f, sf = self.f, self.sf
+        
+        dom = np.linspace(max(0, f-4*sf), f+4*sf, 25)
+        yp = np.array(list(map(self.poiss, dom)))
+        yw = np.array(list(map(self.fun, dom)))-self.fun(f)
+        ax.plot(dom, yw, '+', label='input funct.')
+        ax.plot(dom, yp, '-', label='poisson approx')
+        ax.axhline(0, color='grey', ls=':');
+        for x in [f-sf, f, f+sf]:
+            ax.axvline(x, color='orange', ls='--')
+        ax.legend()
+        ax.axhline(0, color='grey', ls='--')
+        ax.set(ylim=(-9, 0.5,), ylabel='likelihood')

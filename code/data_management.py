@@ -92,12 +92,20 @@ class TimedData(object):
         stop =  np.round(self.exposure.stop.values[-1])
         if self.mjd_range is None:
             self.mjd_range = (start,stop)
-        step = self.interval
-        nbins = int(round((stop-start)/step))
-        time_bins = np.linspace(start, stop, nbins+1)
-        if self.verbose>0:
-            print(f'Default binning: {nbins} intervals of {step} days, '\
-                  f'in range ({time_bins[0]:.1f}, {time_bins[-1]:.1f})')
+        if self.interval >0:
+            step = self.interval
+            nbins = int(round((stop-start)/step))
+            time_bins = np.linspace(start, stop, nbins+1)
+            if self.verbose>0:
+                print(f'Default binning: {nbins} intervals of {step} days, '\
+                      f'in range ({time_bins[0]:.1f}, {time_bins[-1]:.1f})')
+        else:
+            a, b = self.get_contiguous_exposures()
+            edges = np.empty(len(a)+1)
+            edges[0] = a[0]
+            edges[1:-1] = 0.5*(a[1:]+b[:-1])
+            edges[-1]= b[-1]
+            time_bins = edges
         return time_bins 
 
     def _process_weights(self):
@@ -115,12 +123,14 @@ class TimedData(object):
         ok = np.logical_not(pd.isna(gd.weight))
         self.photons = gd.loc[ok,:]
         
-    def binned_weights(self, bins=None):
+    def binned_weights(self, bins=None, contiguous=False):
         """ 
         Parameter:
             bins : None | float | array
                 if None, use defaults
                 Otherwise an array of MJD bin edges
+            contiguous : bool
+                if True ignore bins arg and use a list of contiguous exposure intervals
                 
         Returns: a BinnedWeight object for access to each set of binned weights
             The object can be indexed, or used in a for loop
@@ -131,6 +141,14 @@ class TimedData(object):
                   w   : array of weights for the time range
                   S,B : predicted source, background counts for this bin
             """
+        if contiguous:
+            assert bins is None, 'contiguous selected'
+            a, b = self.get_contiguous_exposures()
+            edges = np.empty(len(a)+1)
+            edges[0] = a[0]
+            edges[1:-1] = 0.5*(a[1:]+b[:-1])
+            edges[-1]= b[-1]
+            bins = edges
         return BinnedWeights(self, bins)     
 
     def get_binned_exposure(self, time_bins):
@@ -200,6 +218,28 @@ class TimedData(object):
         if self.verbose>0:
             print(f'\t{sum(np.isnan(photons.weight.values))} weights set to NaN')
         return wtd # for reference   
+    
+    def get_contiguous_exposures(self, max_interval=10 ):
+        """Combine exposure intervals
+        """
+        
+        t0s = self.exposure.start.values
+        t1s = self.exposure.stop.values
+        break_mask = (t0s[1:]-t1s[:-1])>max_interval/day 
+        break_starts = t1s[:-1][break_mask]
+        break_stops = t0s[1:][break_mask]
+        # now assumble the complement
+        good_starts = np.empty(len(break_starts)+1)
+        good_stops = np.empty_like(good_starts)
+        good_starts[0] = t0s[0]
+        good_starts[1:] = break_stops
+        good_stops[-1] = t1s[-1]
+        good_stops[:-1] = break_starts
+        if self.verbose>1:
+            print(f'Generate list of contiguous exposures:\n'\
+                  f'  WIth max interval {max_interval} s, combine {len(t0s):,} exposure entries to {len(good_stops):,} ')
+        return good_starts, good_stops
+        
 
     def _check_files(self, mjd_range):
         """ return lists of files to process

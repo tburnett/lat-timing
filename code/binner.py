@@ -128,6 +128,15 @@ class BinnedWeights(object):
 
     def __len__(self):
         return self.N
+    
+    @property
+    def dataframe(self):
+        """ a view of the data as a DataFrame, using the MJD time as an index
+        """
+        d = dict()
+        for cell in self:
+            d[cell['t']] = cell
+        return pd.DataFrame.from_dict(d, orient='index' )
 
     def test_plots(self):
         """Make a set of plots of exposure, counts, properties of weights, if any
