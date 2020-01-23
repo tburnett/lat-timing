@@ -1,15 +1,14 @@
 #!/bin/bash
 # Setup and start a  jupyterlab server
 
-# path to  anaconda
-# enable if not done in .bashrc
-#myconda=/nfs/farm/g/glast/u/burnett/anaconda3
-#export PATH=${myconda}/bin:${PATH}
+# the conda environment with python 3.8
+conda activate py3
 
 # path to pointlike data setup
 export FERMI=/nfs/farm/g/glast/g/catalog/pointlike/fermi
+
 # for P8R3_V2 irfs
-export CALDB=/afs/slac/g/glast/groups/canda/irfs/p8_merit/P8R3_V2/CALDB
+export CALDB=$CONDA_PREFIX_1/envs/fermi2/share/fermitools/data/caldb
 
 # set python path to include code here (with physical links)
 here=`pwd -P`
