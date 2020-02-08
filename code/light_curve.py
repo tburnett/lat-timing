@@ -63,7 +63,6 @@ class LogLike(object):
         return f'{self.__class__.__module__}.{self.__class__.__name__}:'\
         f' time {self.t:.3f}, {len(self.w)} weights,  exposure {self.fexp:.2f}, S {self.S:.0f}, B {self.B:.0f}'
         
-
     def gradient(self, pars ):
         """gradient of the log likelihood with respect to alpha=flux-1 and beta, or just alpha
         """
@@ -234,7 +233,7 @@ class PoissonRep(object):
                        errors=np.abs(np.array(p.errors)-p.flux).round(3),
                        limit=np.round(p.limit, 3), 
                        ts=np.round(p.ts,3), 
-                       poiss=self.poiss, 
+                       poiss_pars=list(np.float32(self.poiss.p)), 
                       ) 
 
     def __call__(self, flux):
@@ -323,6 +322,8 @@ class LightCurve(object):
         keyword_options.process(self,kwargs)
         global data
         self.data=data=binned_weights.data
+        self.source_name = self.data.source_name
+        self.verbose = self.data.verbose
 
         # select the set of cells 
         self.cells = [LogLike(ml) for ml in binned_weights if ml['fexp']>self.min_exp] 
@@ -335,9 +336,9 @@ class LightCurve(object):
             raise Exception(f'Unrecognized rep: "{self.rep}", must be one of {self.replist}')
         repcl = self.rep_class[self.replist.index(self.rep)]
         
-        #self.fit_df = self.fit(repcl)
-#         try:
         self.fit_df = self.fit(repcl)
+#         try:
+#             self.fit_df = self.fit(repcl)
 #         except Exception as msg:
 #             print(f'Fail fit: {msg} ') #'; stop here')
 #             raise Exception(msg)
@@ -345,6 +346,18 @@ class LightCurve(object):
     def __repr__(self):
         return f'{self.__class__} {len(self.cells)} cells fit with rep {self.rep}'
     
+    def write(self, filename):
+        with open(filename, 'wb') as out:
+            pickle.dump(
+                dict(source_name=self.source_name, 
+                        rep=self.rep,
+                        edges = self.data.edges,
+                        fit_dict = self.fit_df.to_dict('records'),
+                    ),
+                out)
+            if self.verbose>0:
+                print(f'Wrote light curve for source "{self.source_name}" to {filename}')
+
     def __getitem__(self, i):
         return self.cells[i]
     
@@ -393,12 +406,13 @@ class LightCurve(object):
 
         def create_table(poiss):
             # make a table of evently-spaced points between limits
-            a,b = poiss.cdfinv(support), poiss.cdfcinv(support)
+            a = poiss.cdfinv(support) if poiss.flux>0 else 0
+            b = poiss.cdfcinv(support)
             x = np.linspace(a,b,npts).astype(np.float32)
             y = np.array(list(map(poiss, x))) .astype(np.float32)
             return x, y
 
-        for i,poiss in enumerate(df.poiss.values):
+        for i,poiss in enumerate(map( poisson.Poisson, df.poiss_pars.values)):
             dom[i], cod[i] = create_table(poiss)
         return dom, cod
     
@@ -416,7 +430,8 @@ class LightCurve(object):
         else: 
             bar=df; lim=[]
         
-        fig, ax = plt.subplots(figsize=(12,4)) if ax is None else (ax.figure, ax)
+        fig, ax = plt.subplots(figsize=(12,4)) if ax is None else (ax.figure, ax)\
+            if ax is not None else (ax.figure,ax)
         
         # the points with error bars
         t = bar.t
@@ -427,7 +442,7 @@ class LightCurve(object):
         elif self.rep=='gauss' or self.rep=='gauss2d':
             dy = bar.sig_flux.clip(0,4)
         else: assert False     
-        ax.errorbar(x=t, y=y, xerr=xerr, yerr=dy, fmt='+')
+        ax.errorbar(x=t, y=y, xerr=xerr, yerr=dy, fmt=' ', color='silver')
         
         # now do the limits
         if len(lim)>0:
@@ -436,13 +451,13 @@ class LightCurve(object):
             y = lim.limit.values
             yerr=0.2*(1 if kw['yscale']=='linear' else y)
             ax.errorbar(x=t, y=y, xerr=xerr,
-                    yerr=yerr,  color='C1', 
+                    yerr=yerr,  color='lightsalmon', 
                     uplims=True, ls='', lw=2, capsize=4, capthick=0,
                     alpha=0.5)
         
         #ax.axhline(1., color='grey')
         ax.set(**kw)
-        ax.set_title(title or f'{self.data.source_name}, rep {self.rep}')
+        ax.set_title(title or f'{self.source_name}, rep {self.rep}')
         ax.grid(alpha=0.5)
         
     def fit_hists(self, title=None, **hist_kw):
@@ -477,7 +492,21 @@ class LightCurve(object):
         shist(ax2, yerr, (1e-2, 0.3), 25, 'sigma', xlog=True)
         shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
         fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
-        
+
+
+class LightCurveX(LightCurve):
+    """ subclass of LightCurve instantiated from file generate by it
+    """
+    def __init__(self, filename, verbose=1):
+        with open(filename, 'rb') as inp:
+            t = pickle.load(inp)
+            self.source_name = t['source_name']
+            self.rep = t['rep']
+            self.verbose=verbose
+            self.fit_df = pd.DataFrame(t['fit_dict'])
+            
+    def __repr__(self):
+        return f'{self.__class__.__name__}: source "{self.source_name}" fit with {len(self.fit_df)} cells'
 
 class CountFitness(FitnessFunc):
     """
@@ -632,8 +661,7 @@ class BayesianBlocks(object):
         self.lc = lc
         self.data = lc.data
         self.cells = lc.dataframe
-        assert 'poiss' in self.cells.columns, 'Expect the dataframe ho have the Poisson representation'
-        self.verbose = self.data.verbose
+        assert 'poiss_pars' in self.cells.columns, 'Expect the dataframe ho have the Poisson representation'
         self.fitness_func = dict(zip(self.func_names, self.func_classes)).get(fitness_func, self.func_classes[0])
         if self.fitness_func is None:
             raise Exception(f'Valid names for fitness_func are: {self.func_names}')

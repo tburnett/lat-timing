@@ -10,23 +10,35 @@ from binner import BinnedWeights
 
 
 class WeightedData(object):
-    """ Implement weights for a TimedData object
+    """ Add  weights to a TimedData object
+        Use either a file derived from an time-averaged model, basically a map from position and energy/event type,
+        or a simple functional model to map from radial position  and energy/event type
     """    
-    def __init__(self, data, filename, fix_weights=True):
+    def __init__(self, data, weight_filename=None, 
+                       weight_model=None):
         """
         data : a TimedData object containing basic photon data
-        filename : str, the file name to open
+        weight_filename : str, the file name to open
+        fix_weights: use weight_model to set or override weights
+        weight_model : None or instance of WeigthModel
+            if None, create a WeightModel from data and apply to bands with missing weights
+            else use to override or set weights
         """
         self.data = data
         self.photon_data = data.photon_data
         self.verbose = data.verbose
         self.nside = data.nside
-        self.add_weights(filename, fix_weights)
+        if  weight_filename is not None:
+            self.add_weights_from_skymodel(weight_filename)
+        elif weight_model is not None:
+            self.add_weights_from_model(weight_model)
+        else:
+            raise Exception('No weight procedure')
         self.source_name = data.source_name
         self.edges=data.edges
     
        
-    def add_weights(self, filename, fix_weights):
+    def add_weights_from_skymodel(self, filename, ):
         """Add weights to the photon data
         
         filename: pickled dict with map info
@@ -79,6 +91,18 @@ class WeightedData(object):
         if self.verbose>0:
             print(f'\t{sum(np.isnan(photons.weight.values))} weights set to NaN')
         return wtd # for reference   
+    
+    def add_weights_from_model(self, filename):
+        assert os.path.exists(filename),f'File {filename} not found.'
+        with open(filename, 'rb') as inp:
+            z = pickle.load(inp)
+            assert type(z)==dict, f'expected a dictionary in file {filenanme}'
+            self.wm = WeightModel(z)
+        if self.verbose>0:
+            print(f'Adding weights from model at\n   {os.path.realpath(filename)}')
+            df = self.photon_data
+            df.loc[:,'weight'] = list(map(self.wm, df.band.values, df.radius.values))
+        
     
     def get_binned_exposure(self, bins):
         # pass on request to the data
@@ -138,11 +162,11 @@ class WeightModel(object):
     def __init__(self, model):
         """Parameterize weights as function of radius
         
-        model : string | parameter dict
+        model_file : string | parameter dict
             if string, assume filename for the dict
         """
         if type(model)==str:
-            with open(model_file, 'rb') as f:
+            with open(model, 'rb') as f:
                 self.dd =pickle.load(f)
         else:
             self.dd=model
