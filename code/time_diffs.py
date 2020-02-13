@@ -263,7 +263,7 @@ class TDPower(object):
                 lambda val,pos: { 1e-2:'0.01',  0.1:'0.1', 1:'1', 10:'10'}.get(val,'')))
 
         ax1.loglog(self.x, self.y, '.')
-        ax1.set(xlim=xlim, ylabel='Power (arbitrary units)')
+        ax1.set(xlim=xlim, ylabel='Power (arbitrary units)', ylim=ylim)
         ax1.grid(alpha=0.5, axis='x', which='both')
         ax1.grid(alpha=0.5, axis='y', which='major')
         ax1.text(0.75,0.65,

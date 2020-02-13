@@ -6,6 +6,7 @@ import os, glob, pickle
 import healpy
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 
 from scipy.integrate import simps
 from astropy.io import fits
@@ -54,14 +55,14 @@ class TimedData(object):
         ('base_spectrum', 'lambda E: (E/1000)**-2.1', 'Spectrum to use'),
         ('energy_domain', 'np.logspace(2,5,13)', 'energy bins for exposure calculation'),
         ('nside', 1024, 'HEALPix nside which was used to bin photon data positions'),
+        ('nest',   False, 'HEALPix used RIHG'),
         ('ignore_gti', False, ''),
     )
 
     @keyword_options.decorate(defaults)
     def __init__(self, setup, **kwargs):
         """
-        setup : a dict with
-        source_name, 
+        setup : a dict with at least source_name, l,b 
         """
         keyword_options.process(self,kwargs)
         self.__dict__.update(setup.__dict__) # copy stuff from client
@@ -74,6 +75,9 @@ class TimedData(object):
         self.exposure =  self._process_ft2(ft2_files,self.gti)
         photon_data = self._process_data(data_files, self.gti)
 
+        if photon_data is None:
+            print( 'No photon data??')
+            return
         # set up DataFrame with all photons, and default binning
         self.photon_data =self._check_photons(self.exposure, photon_data)      
         self.edges = self._default_bins()
@@ -180,9 +184,10 @@ class TimedData(object):
         test_elements = 'energy_bins pixels weights nside model_name radius order roi_name'.split()
         assert np.all([x in wtd.keys() for x in test_elements]),f'Dict missing one of the keys {test_elements}'
 
+
+        pos = wtd['source_lb']
         if self.verbose>0:
             print(f'Adding weights from file {os.path.realpath(filename)}')
-            pos = wtd['source_lb']
             print(f'Found weights for {wtd["source_name"]} at ({pos[0]:.2f}, {pos[1]:.2f})')
         # extract pixel ids and nside used
         wt_pix   = wtd['pixels']
@@ -266,7 +271,7 @@ class TimedData(object):
             if self.verbose>1:
                 print(f'From MJD range {mjd_range} select years {year_range}, months {month_range}')
         else:
-            if self.verbose>1:
+            if self.verbose>2:
                 print('Loading all found data')
 
         self.mjd_range = mjd_range # save for reference
@@ -580,6 +585,120 @@ class TimedData(object):
             ax.grid(alpha=0.5)
         axx[-1].set(xlabel='MJD')
         fig.suptitle(self.source_name)
+
+data_root = '/nfs/farm/g/glast/u/burnett/analysis/lat_timing/data/'
+
+class TimedDataArrow(TimedData):
+    """Subclass of TimedData that uses Arrow parquet storage, basically HDF5
+       Also 
+    
+    """
+    defaults = TimedData.defaults\
+            +(('photon_dataset' ,data_root+'photon_dataset','parquet dataset'),
+              ('tstart_file', data_root+'tstart.pkl', 'dict of tstart values'),
+              ('nest', True, 'HEALPix NEST if true, not RING indexing'))
+
+    
+    @keyword_options.decorate( defaults)                    
+    def __init__(self, setup, **kwargs):
+        keyword_options.process(self, kwargs)
+        infile = self.tstart_file
+        with open(infile, 'rb') as inp:
+            tstart_dict = pickle.load(inp)
+        print(f'Raad {infile} with tstart values')  
+
+        self.photon_data_source = dict(tstart_dict=tstart_dict, 
+                                       dataset=self.photon_dataset)
+        super().__init__(setup, **kwargs)
+        
+    def _check_files(self, mjd_range):
+        assert mjd_range is None, 'MJD range not supported'
+        
+        ft2_files = sorted(glob.glob(os.path.expandvars(self.ft2_file_pattern)))
+        gti_files = sorted(glob.glob(os.path.expandvars(self.gti_file_pattern)))
+        assert len(ft2_files)>0 and len(gti_files)>0, 'Failed to find FT2 or GTI files'
+        return self.photon_data_source, gti_files, ft2_files
+    
+
+    def _process_data(self, dummy1, dummy2): 
+
+        # cone geometry stuff: get corresponding pixels and center vector
+        l,b,radius = self.l, self.b, self.radius  
+        cart = lambda l,b: healpy.dir2vec(l,b, lonlat=True) 
+        conepix = healpy.query_disc(self.nside, cart(l,b), np.radians(radius), nest=self.nest)
+        center = healpy.dir2vec(l,b, lonlat=True)
+        
+        def load_photon_data(table, tstart):
+            """For a given month table, select photons in cone, add tstart to times, 
+            return DataFrame with hand, time, pixel, radius
+            """
+            allpix = np.array(table.column('nest_index'))
+
+            def cone_select(allpix, conepix, shift=None):
+                """Fast cone selection using NEST and shift
+                """
+                if shift is None:
+                    return np.isin(allpix, conepix)
+                assert self.nest, 'Expect pixels to use NEST indexing'
+                a = np.right_shift(allpix, shift)
+                c = np.unique(np.right_shift(conepix, shift))
+                return np.isin(a,c)
+
+            
+            # a selection of all those in an outer cone
+            incone = cone_select(allpix, conepix, 13)
+
+            # times: convert to double, add to start, convert to MJD 
+            time = MJD(np.array(table['time'],float)[incone]+tstart)
+            in_gti = self.gti(time)
+            if np.sum(in_gti)==0:
+                print(f'no photons for month {month}!')
+
+            pixincone = allpix[incone][in_gti]
+            
+            # distance from center for all accepted photons
+            ll,bb = healpy.pix2ang(self.nside, pixincone,  nest=self.nest, lonlat=True)
+            cart = lambda l,b: healpy.dir2vec(l,b, lonlat=True) 
+            t2 = np.degrees(np.array(np.sqrt((1.-np.dot(center, cart(ll,bb)))*2), np.float32)) 
+
+            # assemble the DataFrame, remove those outside the radius
+            out_df = pd.DataFrame(np.rec.fromarrays(
+                [np.array(table['band'])[incone][in_gti], time[in_gti], pixincone, t2], 
+                names='band time pixel radius'.split()))
+            return out_df.query(f'radius<{radius}')
+
+        # get the monthly-partitioned dataset and tstart values
+        dataset = self.photon_data_source['dataset']
+        tstart_dict= self.photon_data_source['tstart_dict']
+        months = tstart_dict.keys() 
+
+        if self.verbose>0: 
+            print(f'Loading data from {len(months)} months ', end='')
+
+
+        
+        dflist=[] 
+        for month in months:
+            table= pq.read_table(dataset, filters=[f'month == {month}'.split()])
+            tstart = tstart_dict[month]
+            d = load_photon_data(table, tstart)
+            if d is not None:
+                dflist.append(d)
+                if self.verbose>1: print('.', end='')
+            else:
+                if self.verbose>1: print('x', end='')
+                continue
+
+        assert len(dflist)>0, '\nNo photon data found?'
+        df = pd.concat(dflist, ignore_index=True)
+        if self.verbose>0:
+            print(f'\n\tSelected {len(df)} photons within {self.radius}'\
+                  f' deg of  ({self.l:.2f},{self.b:.2f})')
+            ta,tb = df.iloc[0].time, df.iloc[-1].time
+            print(f'\tDates: {UTC(ta):16} - {UTC(tb)}'\
+                f'\n\tMJD  : {ta:<16.1f} - {tb:<16.1f}')  
+        return df  
+        
         
 def testdata(**kwargs):
     class Setup(object):

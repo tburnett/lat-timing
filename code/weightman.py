@@ -28,6 +28,7 @@ class WeightedData(object):
         self.photon_data = data.photon_data
         self.verbose = data.verbose
         self.nside = data.nside
+        self.nest  = data.nest # True if index scheme is NEST
         if  weight_filename is not None:
             self.add_weights_from_skymodel(weight_filename)
         elif weight_model is not None:
@@ -70,9 +71,13 @@ class WeightedData(object):
         for k in weight_dict.keys():
             wts[k,:-1] = weight_dict[k]   
 
-        # get the photon pixel ids, convert to NEST and right shift them 
+        # get the photon pixel ids, convert to NEST (if not already) and right shift them 
         photons = self.photon_data
-        photon_pix = healpy.ring2nest(self.nside, photons.pixel.values)
+        if not self.nest:
+            # data are RING
+            photon_pix = healpy.ring2nest(self.nside, photons.pixel.values)
+        else:
+            photon_pix = photons.pixel.values
         to_shift = 2*int(np.log2(self.nside/nside_wt)); 
         shifted_pix =   np.right_shift(photon_pix, to_shift)
         bad = np.logical_not(np.isin(shifted_pix, wt_pix)) 

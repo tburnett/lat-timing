@@ -20,6 +20,7 @@ class LogLike(object):
     def __init__(self, cell):
         """ cell is a dict"""       
         self.__dict__.update(cell)
+        assert len(self.w)>0, f'No data for cell {cell}'
         
     def fit_info(self, fix_beta=True):
         """Perform fits, return a dict with cell info"""

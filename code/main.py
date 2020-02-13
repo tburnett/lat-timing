@@ -4,14 +4,14 @@ Expect to find set of files created by uw/data/timed_data/create_timed_data to g
 Extract a single data set around a cone
 """
 
-import os, pickle
+import os, pickle,  argparse
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
 import keyword_options
 
-from data_management import TimedData
+from data_management import TimedData, TimedDataArrow
 from weightman import WeightedData, WeightModel
 from light_curve import LightCurve, BayesianBlocks
 
@@ -30,6 +30,7 @@ class Main(object):
         ('weight_file', None, 'file name to find weight'),
         ('weight_model', None, 'file name for a weight model'),
         ('fix_weights',  True, 'Set to supplement weights with model' ),
+        ('version',     1.0,   'version number: >1 is new data storage'),
        )
     
     @keyword_options.decorate(defaults)
@@ -43,7 +44,10 @@ class Main(object):
         keyword_options.process(self,kwargs)
 
         self._set_geometry(name, position)
-        self.timedata = TimedData(self, source_name=name, verbose=self.verbose)
+        if self.version>1:
+            self.timedata = TimedDataArrow(self, source_name=name, verbose=self.verbose)
+        else:
+            self.timedata = TimedData(self, source_name=name, verbose=self.verbose)
 
         if self.weight_file is not None:
             # adds weights from map and replace data object
@@ -89,7 +93,7 @@ class Main(object):
             self.l,self.b = (gal.l.value, gal.b.value)
         else:
             self.l,self.b = position
-        if self.verbose>0:
+        if self.verbose>=0:
             print(f'Source "{self.name}" at: (l,b)=({self.l:.3f},{self.b:.3f}); ROI radius={self.radius}')
             
     def light_curve(self, bins=None, **kwargs):
@@ -178,23 +182,24 @@ class Main(object):
 #         pickle.dump(tr, open(outfile, 'w'))
 
 class AGNlightcurves(object):
-    def __init__(self, source_names, positions=None, path=None, 
+    def __init__(self, source_names, positions=None, path=None, interval=1,
                  weight_model = '../../data/weight_model_agn.pkl', verbose=1):
 
         if positions is None: positions = [None]*len(source_names)
         for self.source_name, position in zip(source_names, positions):
             self.verbose=verbose            
             try:
-                cdata = Main(self.source_name, position=position, interval=1, mjd_range=None, weight_model=weight_model)
+                self.cdata = Main(self.source_name, position=position, interval=interval,
+                             mjd_range=None, weight_model=weight_model, verbose=self.verbose)
             except Exception as msg:
                 print(f'Failed: {msg}')
                 continue
 
-            lc = cdata.light_curve()
+            lc = self.cdata.light_curve()
             self.edges = lc.data.edges
             self.rep = lc.rep
             self.lc_df = lc.fit_df
-            bb = cdata.bayesian_blocks(fitness_func='likelihood')
+            bb = self.cdata.bayesian_blocks(fitness_func='likelihood')
             self.bb_df = bb.fit_df
             if path is not None:
                 self.write(path)
@@ -232,8 +237,7 @@ class AGNlightcurves(object):
                         bb_dict = self.bb_df.to_dict('records')
                     ),
                 out)
-            if self.verbose>0:
-                print(f'Wrote light curve and Bayesian blocks for source "{self.source_name}" to {fullfn}')
+        print(f'Wrote light curve and Bayesian blocks for source "{self.source_name}" to\n   {fullfn}')
 
     
     def flux_plots(self, ax=None, **kwargs):
@@ -305,3 +309,37 @@ class AGNlightcurves(object):
 
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(
             lambda val,pos: { 0.1:'0.1',1.0:'1', 10.0:'10', 100.:'100'}.get(val,'')))
+        
+    def to_galactic(ra,dec):
+        """return (l,b) given ra,dec"""
+        from astropy.coordinates import SkyCoord
+        g = SkyCoord(ra, dec, unit='deg', frame='fk5').galactic
+        return g.l.value, g.b.value
+        
+    
+    def generate_light_curves(fn =  '/nfs/farm/g/glast/g/catalog/pointlike/skymodels/P8_10years/uw9010/plots/associations/bzcat_summary.csv', 
+                              lcpath = '/nfs/farm/g/glast/u/burnett/analysis/lat_timing/data/light_curves/'):
+        df = pd.read_csv(fn, index_col=0)
+
+        for name, rec in df.iterrows():
+            if name.startswith('5B'):
+                name = name[:4]+' '+name[4:]
+            print(f'\n======={name}, TS={rec.ts:.0f}')
+            l,b = to_galactic(rec.ra, rec.dec)
+
+            u = main.AGNlightcurves([name], [(l,b)], path=lcpath, verbose=0)
+        
+    if __name__=='__main__':
+        parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
+            description="Create light curves")
+        parser.add_argument('input',  nargs='?',  help='csv file name with source info')
+        parser.add_argument('output_path', nargs='?', default='.', help='path to save output files')
+#         parser.add_argument('-p', '--proc', 
+#                         default=, 
+#                         help='proc name,  default: "%(default)s"')
+        
+        parser.print_help()
+        args = parser.parse_args()
+        print(args.input, args.output_path)
+#         generate_light_curves()
+    
