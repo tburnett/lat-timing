@@ -192,8 +192,8 @@ class CombinedLightcurves(object):
         sources : list of source dicts or a single one
             the dict must have at least a 'name' key
             optional: 
-                l,b, or ra, dec
-                weight_model or weight_file
+                l,b, or ra, dec--the position will be determined if the name is recognized
+                weight_model or weight_file--use default if not present
         """
         keyword_options.process(self,kwargs)
         if isinstance(sources, dict):
@@ -280,7 +280,10 @@ class CombinedLightcurves(object):
                 if True, make steps
             """
             if df is None: return
-            kw=dict(yscale='log',xlabel='MJD', ylabel='relative flux per day',color='blue', lw=1, fmt='+')
+            nd = self.interval
+            kw=dict(yscale='log', xlabel='MJD', 
+                    ylabel=f'relative flux per {"day" if nd==1 else str(nd)+" days"}',
+                    color='blue', lw=1, fmt='+')
             kw.update(**kwargs)
 
             lw= kw.pop('lw')
