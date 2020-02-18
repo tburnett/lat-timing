@@ -30,7 +30,7 @@ class Main(object):
         ('weight_file', None, 'file name to find weight'),
         ('weight_model', None, 'file name for a weight model'),
         ('fix_weights',  True, 'Set to supplement weights with model' ),
-        ('version',     1.0,   'version number: >1 is new data storage'),
+        ('version',     2.0,   'version number: >1 is new data storage'),
        )
     
     @keyword_options.decorate(defaults)
@@ -94,7 +94,7 @@ class Main(object):
         else:
             self.l,self.b = position
         if self.verbose>=0:
-            print(f'Source "{self.name}" at: (l,b)=({self.l:.3f},{self.b:.3f}); ROI radius={self.radius}')
+            print(f'\nSource "{self.name}" at: (l,b)=({self.l:.3f},{self.b:.3f}); ROI radius={self.radius}')
             
     def light_curve(self, bins=None, **kwargs):
         """ Rerurn a LIghtCurve object, containing a table of fluxes and other cell info
@@ -181,19 +181,46 @@ class Main(object):
 #         tr = binned_data.ConvertFT1(filename).time_record()
 #         pickle.dump(tr, open(outfile, 'w'))
 
-class AGNlightcurves(object):
-    def __init__(self, source_names, positions=None, path=None, interval=1,
-                 weight_model = '../../data/weight_model_agn.pkl', verbose=1):
-
-        if positions is None: positions = [None]*len(source_names)
-        for self.source_name, position in zip(source_names, positions):
-            self.verbose=verbose            
+class CombinedLightcurves(object):
+    
+    defaults = Main.defaults
+  
+    @keyword_options.decorate(defaults)
+    def __init__(self, sources, path=None, image_dir=None, **kwargs):
+        """Generate one or many light curves with the BB version overlayed on an interval
+        
+        sources : list of source dicts or a single one
+            the dict must have at least a 'name' key
+            optional: 
+                l,b, or ra, dec
+                weight_model or weight_file
+        """
+        keyword_options.process(self,kwargs)
+        if isinstance(sources, dict):
+            sources=[sources]
+        
+        def position(s):
+            keys = list(s.keys())
+            if 'l' in keys and 'b' in keys:
+                return (s['l'], s['b'])
+            if 'ra' in keys and 'dec' in keys:
+                s = SkyCoord(s['ra'],s['dec'], unit='deg', frame='fk5').transform_to('galactic')
+                return( s.l.value, s.b.value)
+            return None
+        
+        for s in sources:
             try:
-                self.cdata = Main(self.source_name, position=position, interval=interval,
-                             mjd_range=None, weight_model=weight_model, verbose=self.verbose)
+
+                self.source_name=s['name']
+                self.cdata = Main(s['name'], position=position(s), 
+                                  mjd_range=self.mjd_range, 
+                                  weight_model= s.get('weight_model', self.weight_model),
+                                  weight_file = s.get('weight_file', self.weight_file), 
+                                  verbose=self.verbose,
+                                  version=self.version)
+
             except Exception as msg:
                 print(f'Failed: {msg}')
-                continue
 
             lc = self.cdata.light_curve()
             self.edges = lc.data.edges
@@ -203,6 +230,8 @@ class AGNlightcurves(object):
             self.bb_df = bb.fit_df
             if path is not None:
                 self.write(path)
+            if image_dir is not None:
+                self.flux_plots(outdir=image_dir)
            
     @classmethod
     def from_file(cls, filename , verbose=1):
@@ -240,7 +269,7 @@ class AGNlightcurves(object):
         print(f'Wrote light curve and Bayesian blocks for source "{self.source_name}" to\n   {fullfn}')
 
     
-    def flux_plots(self, ax=None, **kwargs):
+    def flux_plots(self, ax=None, outdir=None, **kwargs):
         import matplotlib.ticker as ticker
             
         def flux_plot( df, ts_max=9,  step=False, **kwargs): 
@@ -309,6 +338,12 @@ class AGNlightcurves(object):
 
         ax.yaxis.set_major_formatter(ticker.FuncFormatter(
             lambda val,pos: { 0.1:'0.1',1.0:'1', 10.0:'10', 100.:'100'}.get(val,'')))
+        if outdir is not None:
+            filename = self.source_name.replace(' ', '_',).replace('+','p')+'.png'
+            fig.tight_layout()
+            fig.savefig(f'{outdir}/{filename}')
+            if self.verbose>0:
+                print(f'Saved figure to {filename}')
         
     def to_galactic(ra,dec):
         """return (l,b) given ra,dec"""
@@ -327,12 +362,13 @@ class AGNlightcurves(object):
             print(f'\n======={name}, TS={rec.ts:.0f}')
             l,b = to_galactic(rec.ra, rec.dec)
 
-            u = main.AGNlightcurves([name], [(l,b)], path=lcpath, verbose=0)
+            u = main.CombinedLightcurves([name], [(l,b)], path=lcpath, verbose=0)
         
     if __name__=='__main__':
         parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter,
             description="Create light curves")
-        parser.add_argument('input',  nargs='?',  help='csv file name with source info')
+        parser.add_argument('input',  nargs='?',  
+                            help='csv file name with source info')
         parser.add_argument('output_path', nargs='?', default='.', help='path to save output files')
 #         parser.add_argument('-p', '--proc', 
 #                         default=, 
@@ -342,4 +378,3 @@ class AGNlightcurves(object):
         args = parser.parse_args()
         print(args.input, args.output_path)
 #         generate_light_curves()
-    

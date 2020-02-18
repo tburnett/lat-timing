@@ -673,10 +673,8 @@ class TimedDataArrow(TimedData):
         months = tstart_dict.keys() 
 
         if self.verbose>0: 
-            print(f'Loading data from {len(months)} months ', end='')
-
-
-        
+            print(f'Loading data from {len(months)} months from Arrow dataset {dataset}\n', end='')
+       
         dflist=[] 
         for month in months:
             table= pq.read_table(dataset, filters=[f'month == {month}'.split()])

@@ -1,37 +1,40 @@
 ## Time analysis code
 
-* Main
- * [main.py](https://github.com/tburnett/lat_timing/blob/master/code/main.py)<br>
+* Light Curves
+    * [main.py](https://github.com/tburnett/lat_timing/blob/master/code/main.py)<br>
 Top level interface, via `class Main` 
- * [binner.py](https://github.com/tburnett/lat_timing/blob/master/code/binner.py) <br> 
- * [light_curve.py](https://github.com/tburnett/lat_timing/blob/master/code/light_curve.py)<br>  
- * [timed_data.py](https://github.com/tburnett/lat_timing/blob/master/code/timed_data.py)<br>
- * [data_management.py](https://github.com/tburnett/lat_timing/blob/master/code/data_management.py) <br>
- Load photon data as described below. Also load corresponding FT2 files and construct 
- * [weightman.py](https://github.com/tburnett/lat_timing/blob/master/code/weightman.py)<br>
+    * [data_management.py](https://github.com/tburnett/lat_timing/blob/master/code/data_management.py) <br>
+ Load photon data as described below. Also load corresponding FT2 files and construct exposure.
+    * [weightman.py](https://github.com/tburnett/lat_timing/blob/master/code/weightman.py)<br>
  Manage weights--reads a file (described below) that has a map of the weight for each band and healpix nside=64 index.
-
+    * [binner.py](https://github.com/tburnett/lat_timing/blob/master/code/binner.py) <br>
+    binning code
+    * [light_curve.py](https://github.com/tburnett/lat_timing/blob/master/code/light_curve.py)<br>
+    Generate light curves.
 
 * Time differencing
- * [EZPsearch.py](https://github.com/tburnett/lat_timing/blob/master/code/EZPsearch.py)  
+    * [EZPsearch.py](https://github.com/tburnett/lat_timing/blob/master/code/EZPsearch.py)  
  Copy of public code from UCSC for reference (python 2)
- * [time_diffs.py](https://github.com/tburnett/lat_timing/blob/master/code/time_diffs.py) 
+    * [time_diffs.py](https://github.com/tburnett/lat_timing/blob/master/code/time_diffs.py) 
 
 
 * Kerr interface
- * [core_interface.py](https://github.com/tburnett/lat_timing/blob/master/code/core_interface.py)   
- * [core.py](https://github.com/tburnett/lat_timing/blob/master/code/core.py)    
+    - [core_interface.py](https://github.com/tburnett/lat_timing/blob/master/code/core_interface.py)<br>
+    Interface to `core`, for comparison.
+    - [core.py](https://github.com/tburnett/lat_timing/blob/master/code/core.py)<br>
+    Basically a python 3 copy of the relevant parts of Matthew's code.
 
 
 * Utilities
- * [poisson.py](https://github.com/tburnett/lat_timing/blob/master/code/poisson.py)  
- * [keyword_options.py](https://github.com/tburnett/lat_timing/blob/master/code/keyword_options.py) 
- * [effective_area.py](https://github.com/tburnett/lat_timing/blob/master/code/)   
+    * [poisson.py](https://github.com/tburnett/lat_timing/blob/master/code/poisson.py) 
+    Poisson fitter, adapted from similar code used by `pointlike`
+    * [keyword_options.py](https://github.com/tburnett/lat_timing/blob/master/code/keyword_options.py) 
+    * [effective_area.py](https://github.com/tburnett/lat_timing/blob/master/code/)   
  
 
 ## Data location, formats
 
-The 11-year dataset at the location `/nfs/farm/groups/glast/ `
+The 11-year dataset, as monthly FT1 files, is at the location `/afs/slac/g/glast/groups/catalog/P8_P305/zmax105/*.fits`
 ### Photons<br>
 I use `pointlike` code [pointlike/uw/data/timed_data](https://github.com/tburnett/pointlike/blob/master/python/uw/data/timed_data.py) to process FT1 files.
 It applies the `time_record()` method of the class [`ConvertFT1`](https://github.com/tburnett/pointlike/blob/451c9e0fc5a888d771fe0274a3438594599dc442/python/uw/data/binned_data.py#L490).
@@ -79,4 +82,29 @@ Using 102 nside=64 pixels.  distance range 0.57 to 5.20 deg
 wrote file 504N-0010_weights.pkl
 ```
 
-The file is a pickled dictionary with a `weight` key along with other info. The value is itself a dictionary with keys corresponding to 
+The file is a pickled dictionary with a `weight` key along with other info. The value is itself a dictionary with keys corresponding to ...
+
+** Weight model
+
+Data
+
+```
+<class 'weightman.WeightModel'>: parameters
+           0         1             2
+0   0.697759  0.630501  1.469011e-01
+1   0.697759  0.630501  5.876045e-01
+2   0.835371  0.714667  8.335266e-02
+3   0.835371  0.714667  3.334107e-01
+4   0.900535  0.699340  3.522621e-02
+5   0.820935  0.695448  9.482092e-02
+6   0.914699  0.613026  1.151858e-02
+7   0.887747  0.689820  3.999733e-02
+8   0.904244  0.459531  3.463571e-03
+9   0.899954  0.617158  1.463372e-02
+10  0.871171  0.326957  1.377579e-03
+11  0.892478  0.520231  5.527410e-03
+12  0.805406  0.146890  4.103557e-04
+13  0.855904  0.389639  1.977349e-03
+14  0.027667  0.001089  6.243793e-07
+15  0.136263  0.014189  2.052199e-06
+```
