@@ -63,7 +63,7 @@ There are 132 timed data files, 4.8 GB tota
 ```
 
 ### Weights<br>
-This also depends on `pointlike`. THe code is in [souurce_weights.py](https://github.com/tburnett/pointlike/blob/master/python/uw/like2/source_weights.py)
+This also depends on `pointlike`. THe code is in [source_weights.py](https://github.com/tburnett/pointlike/blob/master/python/uw/like2/source_weights.py)
 
 I am using the 10-year all-sky model uw9011. The notebook is here:
 
