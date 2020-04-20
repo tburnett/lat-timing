@@ -108,3 +108,11 @@ Data
 14  0.027667  0.001089  6.243793e-07
 15  0.136263  0.014189  2.052199e-06
 ```
+
+ $\frac{d N}{d (\Delta TS)}{} \propto \exp(-\frac{\Delta TS}{2\ f^2})$
+ 
+ $f = \sqrt{\alpha^2 + (\beta\ /R_{95})^2}$
+ 
+ $R_{95} \Rightarrow R_{95} \sqrt{\alpha^2 + (\beta\ /R_{95})^2}$
+ 
+ $\Delta TS \Leftarrow \Delta TS\ /\ (\alpha^2 + (\beta\ /R_{95})^2) $

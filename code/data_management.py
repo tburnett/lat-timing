@@ -40,20 +40,29 @@ class TimedData(object):
     
     defaults=(
         ('source_name', 'unnamed', 'name for source'),
-        ('radius', 5, 'cone radius for selection [deg]'),
-        ('verbose',2,'verbosity level'),
+
+        ('verbose',3,'verbosity level'),
+        
         'File locations, as glob patterns',
         ('data_file_pattern','$FERMI/data/P8_P305/time_info/month_*.pkl', 'monthly photon data files'),
         ('ft2_file_pattern', '/nfs/farm/g/glast/g/catalog/P8_P305/ft2_20*.fits', 'yearly S/C history files'),
         ('gti_file_pattern', '$FERMI/data/P8_P305/yearly/*.fits', 'glob pattern for yearly Files with GTI info'),
+        ('energy_edges', np.logspace(2,6,17), 'expected eneegy bins'),
+        
         'S/C limits',
         ('cos_theta_max', 0.4, 'cosine of maximum S/C theta'),
         ('z_max', 100, 'maximum angle between zenith and S/C bore'),
+        
+        'Data selection, binning',
         ('mjd_range', None, 'default MJD limits'),
+        ('radius', 5, 'cone radius for selection [deg]'),
+        ('energy_range', (100.,1e6), 'Selected energy range in MeV'),
         ('interval', 10, 'default binning step'),
+        
         'For estimate of exposure',
         ('base_spectrum', 'lambda E: (E/1000)**-2.1', 'Spectrum to use'),
-        ('energy_domain', 'np.logspace(2,5,13)', 'energy bins for exposure calculation'),
+        #('energy_domain', 'np.logspace(2,5,13)', 'energy bins for exposure calculation (expresson)'),
+        ('bins_per_decade',4, 'binning for exposure intefral'),
         ('nside', 1024, 'HEALPix nside which was used to bin photon data positions'),
         ('nest',   False, 'HEALPix used RIHG'),
         ('ignore_gti', False, ''),
@@ -286,6 +295,7 @@ class TimedData(object):
 
     def _process_data(self, data_files, gti): 
 
+        edom = eval(self.energy_domain)
         dflist=[] 
         if self.verbose>0: print(f'Loading data from {len(data_files)} months ', end='')
         for filename in data_files:
@@ -300,8 +310,9 @@ class TimedData(object):
         assert len(dflist)>0, '\nNo photon data found?'
         df = pd.concat(dflist, ignore_index=True)
         if self.verbose>0:
-            print(f'\n\tSelected {len(df)} photons within {self.radius}'\
-                  f' deg of  ({self.l:.2f},{self.b:.2f})')
+            print(f'\n\tSelected {len(df):,} photons within {self.radius}'\
+                  f' deg of  ({self.l:.2f},{self.b:.2f})'\
+                  f' with energies {edom[0]/1e3}-{edom[-1]/1e3:.0e} Gev')
             ta,tb = df.iloc[0].time, df.iloc[-1].time
             print(f'\tDates: {UTC(ta):16} - {UTC(tb)}'\
                 f'\n\tMJD  : {ta:<16.1f} - {tb:<16.1f}')  
@@ -396,10 +407,17 @@ class TimedData(object):
         uses effective area 
         """
         assert len(livetime)==len(pcosine), 'expect equal-length arrays'
+        
         # get a set of energies and associated weights from a trial spectrum
+ 
+        emin,emax = self.energy_range
+        loge1=np.log10(emin); loge2=np.log10(emax)
+        
+        edom=np.logspace(loge1, loge2, int((loge2-loge1)*self.bins_per_decade+1))
+        if self.verbose>2:
+            print(f'exposure using energy domain {edom}')
         base_spectrum = eval(self.base_spectrum) #lambda E: (E/1000)**-2.1 
         assert base_spectrum(1000)==1.
-        edom = eval(self.energy_domain)
         wts = base_spectrum(edom) 
 
         # effectivee area function from 
@@ -605,7 +623,8 @@ class TimedDataArrow(TimedData):
         infile = self.tstart_file
         with open(infile, 'rb') as inp:
             tstart_dict = pickle.load(inp)
-        print(f'Raad {infile} with tstart values')  
+        if self.verbose>0:
+            print(f'Read {infile} with tstart values')  
 
         self.photon_data_source = dict(tstart_dict=tstart_dict, 
                                        dataset=self.photon_dataset)
@@ -628,11 +647,16 @@ class TimedDataArrow(TimedData):
         conepix = healpy.query_disc(self.nside, cart(l,b), np.radians(radius), nest=self.nest)
         center = healpy.dir2vec(l,b, lonlat=True)
         
+        ebins = self.energy_edges
+        ecenters = np.sqrt(ebins[:-1]*ebins[1:]); 
+        band_limits = 2*np.searchsorted(ecenters, self.energy_range) if self.energy_range is not None else None
+        
         def load_photon_data(table, tstart):
             """For a given month table, select photons in cone, add tstart to times, 
-            return DataFrame with hand, time, pixel, radius
+            return DataFrame with band, time, pixel, radius
             """
             allpix = np.array(table.column('nest_index'))
+   
 
             def cone_select(allpix, conepix, shift=None):
                 """Fast cone selection using NEST and shift
@@ -652,7 +676,7 @@ class TimedDataArrow(TimedData):
             time = MJD(np.array(table['time'],float)[incone]+tstart)
             in_gti = self.gti(time)
             if np.sum(in_gti)==0:
-                print(f'no photons for month {month}!')
+                print(f'WARNING: no photons for month {month}!')
 
             pixincone = allpix[incone][in_gti]
             
@@ -665,7 +689,12 @@ class TimedDataArrow(TimedData):
             out_df = pd.DataFrame(np.rec.fromarrays(
                 [np.array(table['band'])[incone][in_gti], time[in_gti], pixincone, t2], 
                 names='band time pixel radius'.split()))
-            return out_df.query(f'radius<{radius}')
+            
+            # apply final selection for radius and energy range
+         
+            if band_limits is None: return out_df.query(f'radius<{radius}')
+            
+            return out_df.query(f'radius<{radius} & {band_limits[0]} < band < {band_limits[1]}')
 
         # get the monthly-partitioned dataset and tstart values
         dataset = self.photon_data_source['dataset']
@@ -690,11 +719,13 @@ class TimedDataArrow(TimedData):
         assert len(dflist)>0, '\nNo photon data found?'
         df = pd.concat(dflist, ignore_index=True)
         if self.verbose>0:
+            emin,emax = self.energy_range or (self.energy_edges[0],self.energy_edges[-1])
             print(f'\n\tSelected {len(df)} photons within {self.radius}'\
                   f' deg of  ({self.l:.2f},{self.b:.2f})')
+            print(f'\tEnergies: {emin:.1f}-{emax:.0f} MeV')
             ta,tb = df.iloc[0].time, df.iloc[-1].time
-            print(f'\tDates: {UTC(ta):16} - {UTC(tb)}'\
-                f'\n\tMJD  : {ta:<16.1f} - {tb:<16.1f}')  
+            print(f'\tDates:    {UTC(ta):16} - {UTC(tb)}'\
+                f'\n\tMJD  :    {ta:<16.1f} - {tb:<16.1f}')  
         return df  
         
         
@@ -705,3 +736,54 @@ def testdata(**kwargs):
     setup = Setup(source_name='Geminga', l=195.134, b=4.266, interval=1, mjd_range=None)
     setup.__dict__.update(**kwargs)
     return TimedData(setup)
+
+#####################################################################################
+#    Parquet code -- TODO just copied, need to test.
+#           from notebooks/code development/parquet_writer.ipynb
+
+class ParquetConversion(object):
+    import glob, pickle;
+    import healpy
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    
+    def __init__(self, 
+                 data_file_pattern ='$FERMI/data/P8_P305/time_info/month_*.pkl',
+            dataset = '/nfs/farm/g/glast/u/burnett/analysis/lat_timing/data/photon_dataset'):
+
+        self.files = sorted(glob.glob(os.path.expandvars(data_file_pattern)));
+        print(f'Found {len(self.files)} monthly files with pattern {data_file_pattern}'\
+             f'\nWill store parquet files here: {dataset}')
+        if os.path.exists(dataset):
+            print(f'Dataset folder {dataset} exists')
+        else:
+            os.makedirs(dataset)
+        self.dataset=dataset
+            
+    def convert_all(self):
+        files=self.files
+        dataset=self.dataset
+        nside=1024
+    
+        def convert(month):
+
+            infile = files[month-1]
+            print(month, end=',')
+            #print(f'Reading file {os.path.split(infile)[-1]} size {os.path.getsize(infile):,}' )   
+
+            with open(infile, 'rb') as inp:
+                t = pickle.load(inp,encoding='latin1')
+
+            # convert to DataFrame, add month index as new column for partition, then make a Table
+            df = pd.DataFrame(t['timerec'])
+            tstart = t['tstart']
+            df['month']= np.uint8(month)
+            # add a columb with nest indexing -- makes the ring redundant, may remove later
+            df['nest_index'] = healpy.ring2nest(nside, df.hpindex).astype(np.int32)
+            table = pa.Table.from_pandas(df, preserve_index=False)
+
+            # add to partitioned dataset
+            pq.write_to_dataset(table, root_path=dataset, partition_cols=['month'] )
+
+        for i in range(len(files)):
+            convert(month=i+1)

@@ -69,7 +69,10 @@ class WeightedData(object):
         wts = np.full((32, len(wt_pix)+1), np.nan, dtype=np.float32)    
         weight_dict = wtd['weights']
         for k in weight_dict.keys():
-            wts[k,:-1] = weight_dict[k]   
+            t = weight_dict[k]
+            if len(t.shape)==2:
+                t = t.T[0] #???
+            wts[k,:-1] = t   
 
         # get the photon pixel ids, convert to NEST (if not already) and right shift them 
         photons = self.photon_data
@@ -90,7 +93,8 @@ class WeightedData(object):
         # find indices with search and add a "weights" column
         # (expect that wt_pix are NEST ordering and sorted) 
         weight_index = np.searchsorted(wt_pix,shifted_pix)
-        band_index = photons.band.values
+        band_index = np.fmin(31, photons.band.values) #all above 1 TeV into last bin
+        
         # final grand lookup -- isn't numpy wonderful!
         photons.loc[:,'weight'] = wts[tuple([band_index, weight_index])] 
         if self.verbose>0:
@@ -125,6 +129,7 @@ def create_model_dict(df, outfile=None, make_plot=False):
     """
     import matplotlib.pyplot as plt
     dd = dict()
+    vals = [0]*3
     if make_plot:
         fig, axx = plt.subplots(4,4, figsize=(10,10), sharex=True, sharey=True)
         for i, ax in enumerate(axx.flatten()):
@@ -179,6 +184,8 @@ class WeightModel(object):
     def __call__(self, i, r):
         
         a,b,c = self.dd[min(i,13)] 
+        if c==0: return 0 # kluge
+        
         # note limit -- use more-reliable band 13 parameters for all above that
         sr =np.sqrt(r)
         if r<=1: 

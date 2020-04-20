@@ -13,6 +13,7 @@ from astropy.stats.bayesian_blocks import *
 
 data=None # data_managment.Data obect for access to name, verbose, etc.
 
+poisson_tolerance=0.2
     
 class LogLike(object):
     """ implement Kerr Eqn 2 for a single interval, or cell"""
@@ -208,7 +209,8 @@ class PoissonRep(object):
             beta is set to zero (for now)
     """
     
-    def __init__(self, loglike, tol=5e-2):
+    def __init__(self, loglike, tol=poisson_tolerance # note global
+                ):
         """loglike: a LogLike object"""
         
         rate, sig, ts= loglike.rate(no_ts=True)
@@ -651,6 +653,7 @@ class BayesianBlocks(object):
         ('fitness_func', 'counts', 'Type of fitness function to use'),
         ('func_names', 'counts likelihood'.split(), 'allowed functions'),
         ('func_classes', [CountFitness, LikelihoodFitness], 'implemented classes'),
+        ('p0',      0.05, 'probability used to calcualate prior'),
     )
     
     @keyword_options.decorate(defaults)
@@ -674,7 +677,7 @@ class BayesianBlocks(object):
         """
                  
         # Now run the astropy Bayesian Blocks code using my version of the 'event' model
-        fitness = self.fitness_func(self.lc)
+        fitness = self.fitness_func(self.lc, p0=self.p0)
         edges = fitness.fit() 
         
         if self.verbose>0:

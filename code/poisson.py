@@ -54,8 +54,12 @@ class Poisson(object):
 
     
     """
-    def __init__(self,p):
-        self.p = p
+    def __init__(self,p, systematic_factor=1.0):
+        """p : array of parameters
+            systematic_factor : float
+                adjust the "e" parameter to increase width
+        """
+        self.p = p if systematic_factor==1 else [p[0],p[1]/systematic_factor**2, p[2]]
     
     def __call__(self,dom):
         """Return the value of the fit function for the given domain."""
@@ -85,7 +89,7 @@ class Poisson(object):
             return 'flux is zero for source'
         t = np.array(self.errors)/self.flux-1
         relerr = np.abs(np.array(self.errors)/self.flux-1)
-        return f'{self.__module__}.{self.__class__.__name__}: {self.flux:.3f}[1+{relerr[0]:.2f}-{relerr[1]:.2f}]'
+        return f'{self.__module__}.{self.__class__.__name__}: {self.flux:.3f}[1+{relerr[0]:.3f}-{relerr[1]:.3f}]'
 
     @property
     def flux(self):
