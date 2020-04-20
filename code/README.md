@@ -61,9 +61,11 @@ Writing time files to folder /afs/slac/g/glast/groups/catalog//pointlike/fermi/d
 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 
 There are 132 timed data files, 4.8 GB tota
 ```
+#### Conversion to [Apache Parquet](http://parquet.apache.org/documentation/latest/)
+To reduce file size and access time, a separate step, I converted the data to a partitioned Apache parquet dataset. The 11-month file size is now 2.7G, and access time a factor of two faster. The partitions are by month, making it easy to extend as more months are available.
 
 ### Weights<br>
-This also depends on `pointlike`. THe code is in [souurce_weights.py](https://github.com/tburnett/pointlike/blob/master/python/uw/like2/source_weights.py)
+This also depends on `pointlike`. The code is in pointlike's [source_weights.py](https://github.com/tburnett/pointlike/blob/master/python/uw/like2/source_weights.py)
 
 I am using the 10-year all-sky model uw9011. The notebook is here:
 
@@ -108,11 +110,3 @@ Data
 14  0.027667  0.001089  6.243793e-07
 15  0.136263  0.014189  2.052199e-06
 ```
-
- $\frac{d N}{d (\Delta TS)}{} \propto \exp(-\frac{\Delta TS}{2\ f^2})$
- 
- $f = \sqrt{\alpha^2 + (\beta\ /R_{95})^2}$
- 
- $R_{95} \Rightarrow R_{95} \sqrt{\alpha^2 + (\beta\ /R_{95})^2}$
- 
- $\Delta TS \Leftarrow \Delta TS\ /\ (\alpha^2 + (\beta\ /R_{95})^2) $
