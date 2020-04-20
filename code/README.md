@@ -11,6 +11,8 @@ Top level interface, via `class Main`
     binning code
     * [light_curve.py](https://github.com/tburnett/lat_timing/blob/master/code/light_curve.py)<br>
     Generate light curves.
+    * [systematics_study.py](https://github.com/tburnett/lat_timing/blob/master/code/systematic_study.py)<br>
+    Supporting code for systematics calibration.
 
 * Time differencing
     * [EZPsearch.py](https://github.com/tburnett/lat_timing/blob/master/code/EZPsearch.py)  
