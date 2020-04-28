@@ -21,7 +21,7 @@ class LogLike(object):
     def __init__(self, cell):
         """ cell is a dict"""       
         self.__dict__.update(cell)
-        assert len(self.w)>0, f'No data for cell {cell}'
+        assert self.n>0, f'No data for cell {cell}'
         
     def fit_info(self, fix_beta=True):
         """Perform fits, return a dict with cell info"""
@@ -63,7 +63,7 @@ class LogLike(object):
 
     def __repr__(self):
         return f'{self.__class__.__module__}.{self.__class__.__name__}:'\
-        f' time {self.t:.3f}, {len(self.w)} weights,  exposure {self.fexp:.2f}, S {self.S:.0f}, B {self.B:.0f}'
+        f' time {self.t:.3f}, {self.n} weights,  exposure {self.fexp:.2f}, S {self.S:.0f}, B {self.B:.0f}'
         
     def gradient(self, pars ):
         """gradient of the log likelihood with respect to alpha=flux-1 and beta, or just alpha
@@ -71,7 +71,7 @@ class LogLike(object):
         w,S = self.w, self.S
         pars = np.atleast_1d(pars)
   
-        alpha =  max(-1,pars[0] -1)        
+        alpha =  max(-0.999,pars[0] -1)        
         if len(pars)==1:           
             D = 1 + alpha*w
             return np.sum(w/D) - S
@@ -88,7 +88,7 @@ class LogLike(object):
         """
         w = self.w
         pars = np.atleast_1d(pars)
-        alpha = max(-1, pars[0]-1)
+        alpha = max(-0.999, pars[0]-1)
         if  len(pars)==1:
             D = 1 + alpha*w 
             return [np.sum((w/D)**2)]
@@ -487,14 +487,23 @@ class LightCurve(object):
             info = f'mean {x.mean():6.3f}\nstd  {x.std():6.3f}'
             ax.hist(x.clip(*xlim), bins=space(xlim, nbins), **hkw)
             ax.set(xlabel=label, xscale='log' if xlog else 'linear', ylim=(0.8,None))
-            ax.text(0.65, 0.84, info, transform=ax.transAxes,fontdict=dict(size=10, family='monospace')) 
+            ax.text(0.62, 0.82, info, transform=ax.transAxes,fontdict=dict(size=10, family='monospace')) 
             ax.grid(alpha=0.5)
             return ax
 
-        shist(ax1, y, (0.2, 5), 25, 'relative flux', xlog=True).axvline(1, color='grey')
-        shist(ax2, yerr, (1e-2, 0.3), 25, 'sigma', xlog=True)
+        shist(ax1, y, (0.25, 4), 25, 'relative flux', xlog=True).axvline(1, color='grey')
+        shist(ax2, yerr*100, (1, 30), 25, 'sigma [%]', xlog=True)
         shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
         fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
+
+    def mean_std(self):
+        """ return weighted mean and rms"""
+        df = self.fit_df
+        frms = df.errors.apply(lambda err: 0.5*(err[0]+err[1]))
+        fwts = 1/frms**2
+        fmean = np.sum(df.flux*fwts)/np.sum(fwts)
+        t = (df.flux-fmean)/frms
+        return fmean, t.std()
 
 
 class LightCurveX(LightCurve):

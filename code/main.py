@@ -76,7 +76,8 @@ class Main(object):
 
     @property
     def photons(self):
-        return self.df
+        """photon dataframe"""
+        return self.timedata.photon_data
     
     @property
     def cells(self, bins=None):
@@ -89,6 +90,7 @@ class Main(object):
 
     
     def _set_geometry(self, name, position):
+
         self.name=name
         if position is None:
             skycoord = SkyCoord.from_name(name)
@@ -96,7 +98,7 @@ class Main(object):
             self.l,self.b = (gal.l.value, gal.b.value)
         elif type(position)==str:
             sk = SkyCoord(position, frame='fk5').transform_to('galactic')
-            l,b = sk.l.value, sk.b.value
+            self.l,self.b = sk.l.value, sk.b.value
         else:
             self.l,self.b = position
         if self.verbose>0:
@@ -284,9 +286,8 @@ class CombinedLightcurves(object):
             if 'ra' in keys and 'dec' in keys:
                 s = SkyCoord(s['ra'],s['dec'], unit='deg', frame='fk5').transform_to('galactic')
                 return( s.l.value, s.b.value)
-            if 'position' in keys: # (ra,dec) tuple
-                s = SkyCoord(*s['position'], unit='deg', frame='fk5').transform_to('galactic')
-                return( s.l.value, s.b.value)
+            if 'position' in keys: # (l,b) tuple
+                return s['position']
             return None
         
         for s in sources:

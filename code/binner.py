@@ -58,8 +58,8 @@ class BinnedWeights(object):
         elif np.isscalar(bins):
             # scalar is step
             step = bins
-            tstart = data.time_bins[0]
-            time_range = data.time_bins[-1]-tstart
+            tstart = data.edges[0]
+            time_range = data.edges[-1]-tstart
             nbins = int(time_range/step)+1; 
             if data.verbose>0:
                 print(f'Selecting {nbins} intervals of {step} days')

@@ -9,6 +9,8 @@ import os, sys
 import main, keyword_options
 
 class GemingaStudy(object):
+    """ # Geminga Study
+    """
 
     defaults=(
         ('radius', 7, 'ROI radius'),
@@ -76,6 +78,7 @@ class GemingaStudy(object):
         
         
 class MultipleIntervals(list):
+    """ just run multiple intervals"""
 
     def __init__(self, interval_list):
         self.interval_list = interval_list
@@ -83,6 +86,18 @@ class MultipleIntervals(list):
             self.append( GemingaStudy(interval=i) )
         self.widths = [s.rms() for s in self]
 
+class Analyze(list):
+    def doc(self):
+    """ * class Analyze: 
+    make plots from a set of intervals
+    """
+    
+    
+    def __init__(self, multi):
+        self.interval_list=multi.interval_list
+        self+=multi
+        self.widths = [s.rms() for s in self]
+        
     def plot_values(self, ax=None):
         ax = ax or plt.gca()
         ax.plot(self.interval_list, self.widths, 'o--');
@@ -90,14 +105,14 @@ class MultipleIntervals(list):
         ax.xaxis.set_major_formatter(ticker.FuncFormatter(
             lambda val,pos: { 1.0:'1', 10.0:'10', 100.:'100'}.get(val,'')));
         ax.grid(alpha=0.5)
-
+       
     def logpolyfit(self, nfit=6, order=2):
 
-        xx = np.log(self.interval_list[:nfit]); 
+        xx = np.log(self.interval_list[:nfit]) 
         yy = self.widths[:nfit]
         self.pf = np.polyfit(xx, yy, order, full=False)
         print(f'Log of order {order} polynomial fit parameters to'\
-              f' {self.interal_list[nfit]} days: {self.pf.round(4)}')
+              f' {self.interval_list[nfit]} days: {self.pf.round(4)}')
      
     def plot_fit(self, breakat=30):
         yfit = np.poly1d(self.pf)
