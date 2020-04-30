@@ -1,9 +1,9 @@
-import os,inspect
+import os,inspect,string
 import IPython.display as display
 import matplotlib.pyplot as plt
 import numpy as np
 
-def formatter(funct, **kwargs):
+def formatter(funct, folder_path='figs', **kwargs):
     """Docstring formatter as an alternative to matplotlib inline in jupyter notebooks
     
     Expect to be called from a function or class method that generates one or more figures.
@@ -18,49 +18,78 @@ def formatter(funct, **kwargs):
         removed from the second line onwards is removed. Empty lines at the beginning and end are subsequently
         removed. Also, all tabs are expanded to spaces.
         
-    Finally runs the IPython display.
+    Finally runs the IPython display to process the markdown for insertion after the code cell that invokes the function.
+   
+    Unrecognized entries are ignored, allowing latex expressions. (The string must be preceded by an "n"). In case of
+    confusion, double the curly brackets.
     
     funct : the caller function
-        
+    folder_path : string
+        where to put figures
     **kwargs
         additional values to formatted in the docstring
     """    
     
-    # use inspect to get caller frame, the function name, and locals dict
-    assert inspect.isfunction(funct), f'Expected a function'
+    # get docstring from function object
+    assert inspect.isfunction(funct), f'Expected a function: got {funct}'
     doc = inspect.getdoc(funct)
+        
+    # use inspect to get caller frame, the function name, and locals dict
     back =inspect.currentframe().f_back
     name= inspect.getframeinfo(back).function
     locs = inspect.getargvalues(back).locals
     locs.update(kwargs) # add kwargs
     
-    # setup path to save figures in folder with function name
-    path = f'figs/{name}/'
+    # set up path to save figures in folder with function name
+    path = f'{folder_path}/{name}'
     os.makedirs(path, exist_ok=True)
     
-    # process each figure found in locals: assume we want to display them 
+    # process each figure found in local for display 
     def process_figure(fig):
         n = fig.number
         caption=getattr(fig,'caption', '').format(**locs)
-        fn = f'{path}fig_{n}.png'
+        fn = f'{path}/fig_{n}.png'
         # save the figure, include a link in text
         fig.savefig(fn)
         plt.close(fig) # so IPython does not display it if inline set
-        # add the HTML to insert the image, allowing for a caption, to the object
+        # add the HTML to insert the image, including optional caption
         html =  f'<figure> <img src="{fn}" alt="Figure {n}">'\
                 f' <figcaption>{caption}</figcaption>'\
                 '</figure>'
         fig.html=html
         
-    for key,value in locs.items():
-        if isinstance(value, plt.Figure):
-            process_figure(value)
+    [process_figure(value) for value in locs.values() if isinstance(value, plt.Figure)]
     
-    # apply locals, with kwargs, dict to the doc, and pass it to IPython's display as markdown
-    display.display(display.Markdown(doc.format(**locs)))
+    # format local references, including figure HTML,
+    # Use a string.Formatter subclass to ignore bracketed names that are not found
+    #adapted from  https://stackoverflow.com/questions/3536303/python-string-format-suppress-silent-keyerror-indexerror
+
+    class Formatter(string.Formatter):
+        class Unformatted:
+            def __init__(self, key):
+                self.key = key
+            def format(self, format_spec):
+                return "{{{}{}}}".format(self.key, ":" + format_spec if format_spec else "")
+
+        def vformat(self, format_string,  kwargs):
+            return super().vformat(format_string, [], kwargs)
+        def get_value(self, key, args, kwargs):
+            try:
+                return kwargs[key]
+            except KeyError:
+                return Formatter.Unformatted(key)
+        def format_field(self, value, format_spec):
+            return   value.format(format_spec) if isinstance(value, Formatter.Unformatted)\
+                else format(value, format_spec)
+
+    docx = Formatter().vformat(doc, locs)       
+    # replaced: docx = doc.format(**locs)
+
+    # pass to IPython's display as markdown
+    display.display(display.Markdown(docx))
 
 def demo_function( xlim=(0,10)):
-    """
+    r"""
     ## Analysis demo
 
     Note that `xlim = {xlim}`
@@ -76,7 +105,14 @@ def demo_function( xlim=(0,10)):
     This figure is a sqrt
     
     ---
-    Check value of the kwarg *test* passed to the formatter: it is "{test}".
+    Check value of the kwarg *test* passed to the formatter: it is "{test:.2f}".
+    
+    ---
+    Insert some latex to test that it passes unrecognized entries on.
+        \begin{align*}
+        \sin(\theta)^2 + \cos(\theta)^2 =1
+        \end{align*}
+    An inline formula: $\frac{1}{2}=0.5$
     """
 
     x=np.linspace(*xlim)
