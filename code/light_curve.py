@@ -5,6 +5,7 @@ import numpy as np
 import pylab as plt
 import pandas as pd
 import os, sys, pickle
+import matplotlib.ticker as ticker
 
 from scipy import (optimize, linalg)
 from scipy.linalg import (LinAlgError, LinAlgWarning)
@@ -460,17 +461,25 @@ class LightCurve(object):
         
         #ax.axhline(1., color='grey')
         ax.set(**kw)
-        ax.set_title(title or f'{self.source_name}, rep {self.rep}')
+        ax.set_title(title or f'{data.source_name}, rep {self.rep}')
         ax.grid(alpha=0.5)
         
     def fit_hists(self, title=None, **hist_kw):
-        """ Generate set of histograms of rate, error, pull, and maybe TS
+        """### Plot distributions of rate, error, pull
+        
+        Source name:  "{source_name}" 
+        Bins fit with {self.rep} model.
+        
+        {fig}
+        
         """
+        import docstring
+        source_name=data.source_name
         hkw = dict(log=True, histtype='stepfilled',lw=2, edgecolor='blue', facecolor='lightblue')
         hkw.update(hist_kw)
 
         df = self.fit_df
-        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(12,2.5))
+        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(10,3.0), tight_layout=True,)
         x = df.t
         y = df.flux
         if self.rep=='poisson': #mean of high, low 
@@ -489,12 +498,15 @@ class LightCurve(object):
             ax.set(xlabel=label, xscale='log' if xlog else 'linear', ylim=(0.8,None))
             ax.text(0.62, 0.82, info, transform=ax.transAxes,fontdict=dict(size=10, family='monospace')) 
             ax.grid(alpha=0.5)
+            ax.xaxis.set_major_formatter(ticker.FuncFormatter(
+                lambda val,pos: { 1.0:'1', 10.0:'10', 100.:'100', 5:'5', -5:'-5'}.get(val,'')))
             return ax
 
         shist(ax1, y, (0.25, 4), 25, 'relative flux', xlog=True).axvline(1, color='grey')
         shist(ax2, yerr*100, (1, 30), 25, 'sigma [%]', xlog=True)
         shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
-        fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
+        #fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
+        docstring.formatter(self)
 
     def mean_std(self):
         """ return weighted mean and rms"""
