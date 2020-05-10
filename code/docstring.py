@@ -1,3 +1,4 @@
+"""Generate documents for IPython display """
 import os,inspect,string
 import IPython.display as display
 import matplotlib.pyplot as plt
@@ -24,11 +25,10 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     It takes the function's docstring, assumed to be in markdown, and applies format() to format values of any locals. 
     
     Each Figure to be displayed must have a reference in the local namespace, say `fig`, and have a unique number. 
-    Then the  figure will be rendered at the position of a '{fig.html}' entry, 
-    since such an attribute, a reference to a local file, is added to the object during processing.
-    In addition, if an attribute "caption" is found in a Figure object, the text will be displayed as a caption.
+    Then the  figure will be rendered at the position of a '{fig}' entry.
+    In addition, if an attribute "caption" is found in a Figure object, its text will be displayed as a caption.
     
-    Similarly, if there is a reference to a pandas DataFrame, local variable `df`, any occurrence of `<df.html>`
+    Similarly, if there is a reference to a pandas DataFrame, say a local variable `df`, then any occurrence of `{df}`
     will be replaced with an HTML table.
     
     A possibly important detail, given that The markdown processor expects key symbols, like #, to be the first on a line:
@@ -51,43 +51,89 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     # use inspect to get caller frame, the function name, and locals dict
     back =inspect.currentframe().f_back
     name= inspect.getframeinfo(back).function
-    locs = inspect.getargvalues(back).locals
-    locs.update(kwargs) # add kwargs
+    locs = inspect.getargvalues(back).locals.copy() # since may modify
+    # add kwargs if any
+    locs.update(kwargs)
     
     # set up path to save figures in folder with function name
     path = f'{folder_path}/{name}'
-    os.makedirs(path, exist_ok=True)
+
     
     # process each Figure or DataFrame found in local for display 
+    
+    class FigureWrapper(plt.Figure):
+        def __init__(self, fig):
+            self.__dict__.update(fig.__dict__)
+            self.fig = fig
+            
+        @property
+        def html(self):
+            # backwards compatibility with previous version
+            return self.__str__()
+            
+        def __str__(self):
+            if not hasattr(self, '_html'):
+                fig=self.fig
+                n = fig.number
+                caption=getattr(fig,'caption', '').format(**locs)
+                # save the figure to a file, then close it
+                fig.tight_layout(pad=1.05)
+                fn = f'{path}/fig_{n}.png'
+                fig.savefig(fn) #, **fig_kwargs)
+                plt.close(fig) 
+
+                # add the HTML as an attribute, to insert the image, including optional caption
+                self._html =  f'<figure> <img src="{fn}" alt="Figure {n}">'\
+                        f' <figcaption>{caption}</figcaption>'\
+                        '</figure>'
+            return self._html
+        
+        def __repr__(self):
+            return self.__str__()
+
+        
+    class DataFrameWrapper(object): #pd.DataFrame):
+        def __init__(self, df):
+            #self.__dict__.update(df.__dict__) #fails?
+            self._df = df
+        @property
+        def html(self):
+            # backwards compatibility with previous version
+            return self.__str__()
+        def __repr__(self):
+            return self.__str__()
+        def __str__(self):
+            if not hasattr(self, '_html'):
+                kwargs = dict(float_format=lambda x: f'{x:.3f}', notebook=True)
+                kwargs.update(df_kwargs)
+                self._html = self._df.to_html(**kwargs)                
+            return self._html
+
+            
     def figure_html(fig):
         if hasattr(fig, 'html'): return
-        n = fig.number
-        caption=getattr(fig,'caption', '').format(**locs)
-        fn = f'{path}/fig_{n}.png'
-        # save the figure, include a link in text
-        fig.tight_layout(pad=1.05)
-        fig.savefig(fn, **fig_kwargs)
-        plt.close(fig) # so IPython does not display it if inline set
-        # add the HTML to insert the image, including optional caption
-        html =  f'<figure> <img src="{fn}" alt="Figure {n}">'\
-                f' <figcaption>{caption}</figcaption>'\
-                '</figure>'
-        fig.html=html
+        os.makedirs(path, exist_ok=True)
+        
+        return FigureWrapper(fig)
         
     def dataframe_html(df):
-        if hasattr(df, 'html'): return
-        kwargs = dict(float_format=lambda x: f'{x:.3f}')
-        kwargs.update(df_kwargs)
-        df.html = df.to_html(**kwargs)
+        if hasattr(df, 'html'): return None
+        return DataFrameWrapper(df)
    
-    def processor(value):
-        # value: an object reference to be processed if a Figure or DataFrame
+    def processor(key, value):
+        # value: an object reference to be processed 
         ptable = {plt.Figure: figure_html,
                   pd.DataFrame: dataframe_html,
                  }
         f = ptable.get(value.__class__, lambda x: None)
-        f(value)
+        # process the reference: if recognized, there may be a new object
+        newvalue = f(value)
+        if newvalue is not None: 
+            locs[key] = newvalue
+            #print(f'key={key}, from {value.__class__.__name__} to  {newvalue.__class__.__name__}')
     
+    for key,value in locs.items():
+        processor(key,value)
    
     # format local references. Process Figure or DataFrame objects found to include .html representations.
     # Use a string.Formatter subclass to ignore bracketed names that are not found
@@ -106,11 +152,6 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
             except AttributeError as msg:
                 return f'Failed processing because: {msg.args[0]}'
         def get_value(self, key, args, kwargs):
-            if key in kwargs:
-                try:
-                    processor(eval(key, kwargs))                    
-                except NameError:
-                    return f'\tfailed to evaluate {key}'
             return kwargs.get(key, Formatter.Unformatted(key))
 
         def format_field(self, value, format_spec):
@@ -119,31 +160,36 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
             #print(f'\tformatting {value} with spec {format_spec}') #', object of class {eval(value).__class__}')
             return format(value, format_spec)
                         
-    docx = Formatter().vformat(doc, locs)       
+    docx = Formatter().vformat(doc+'\n', locs)       
     # replaced: docx = doc.format(**locs)
 
     # pass to IPython's display as markdown
     display.display(display.Markdown(docx))
 
+
+def md_display(text):
+    """Add text to the display"""
+    display.display(display.Markdown(text+'\n'))
+    
 def demo_function( xlim=(0,10)):
     r"""
-    ## Demonstrate docstring formatting
+    ### Function generating figures and table output
 
     Note the value of the arg `xlim = {xlim}`
 
-    * Display head of the dataframe
-    {dfhead.html}
+    * Display head of the dataframe used to make the plots
+    {dfhead}
     
-    * Figure 1
+    * Figure 1.
     Describe analysis for this figure here.
-    {fig1.html}
+    {fig1}
     Interpret results for Fig. {fig1.number}.  
     
-    * Figure 2
+    * Figure 2.
     A second figure!
-    {fig2.html}
+    {fig2}
     This figure is a sqrt
-    
+
     ---
     Check value of the kwarg *test* passed to the formatter: it is "{test:.2f}".
     
