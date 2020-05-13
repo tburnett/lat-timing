@@ -94,9 +94,10 @@ class TimedData(object):
            
     def __repr__(self):
         b = self.edges
-        return  f'{self.__class__}: for source {self.source_name}'\
-                f'   {len(b)} intervals from {b[0]:.1f} to {b[-1]:.1f}'\
-    
+        return  f'Source "{self.source_name}" at (l,b)= ({self.l:.2f},{self.b:.2f}), radius= {self.radius}  '\
+                f'\n     Data class: {self.__class__.__name__}  '\
+                f'\n     {len(b)} cells, size {self.interval} days from {b[0]:.1f} to {b[-1]:.1f}  '
+       
     def _default_bins(self):
         #set up default bins from exposure; adjust stop to come out even
         # round to whole day

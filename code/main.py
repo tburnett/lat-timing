@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
-import keyword_options
+import keyword_options, docstring
 
 from data_management import TimedData, TimedDataArrow
 from weightman import WeightedData, WeightModel
@@ -17,7 +17,7 @@ from light_curve import LightCurve, BayesianBlocks
 
 
 
-class Main(object):
+class Main(docstring.Displayer):
     """Top-level processing for photon data
     """
  
@@ -42,6 +42,7 @@ class Main(object):
 
         """
         keyword_options.process(self,kwargs)
+        super().__init__()
 
         self._set_geometry(name, position)
         if self.version>1:
@@ -74,6 +75,9 @@ class Main(object):
         else:
             raise Exception('No weight processing specified')
 
+    def __str__(self):
+        return str(self.timedata)
+    
     @property
     def photons(self):
         """photon dataframe"""
@@ -85,7 +89,7 @@ class Main(object):
         """ 
         cells=dict()
         for i,cell in enumerate(self.data.binned_weights(None)):
-            cells[i]= dict(time=cell['t'], n=cell['n'], w=np.array(cell['w']))
+            cells[i]= dict(time=cell['t'], fexp=cell['fexp'],n=cell['n'], w=np.array(cell['w']))
         return pd.DataFrame.from_dict(cells, orient='index'); 
 
     
@@ -133,6 +137,7 @@ class Main(object):
 
     def plot_time(self, radius_max=2, delta_t=2, xlim=None):
         """
+        {fig}
         """
         df = self.df
 
@@ -140,7 +145,7 @@ class Main(object):
         ta,tb=t[0],t[-1]
         Nbins = int((tb-ta)/float(delta_t))
 
-        fig,ax= plt.subplots(figsize=(15,5))
+        fig,ax= plt.subplots(figsize=(15,5), num=self.fignum)
         hkw = dict(bins = np.linspace(ta,tb,Nbins), histtype='step')
         ax.hist(t, label='E>100 MeV', **hkw)
         ax.hist(t[(df.radius<radius_max) & (df.band>0)], label=f'radius<{radius_max} deg', **hkw)
@@ -148,11 +153,15 @@ class Main(object):
         if xlim is not None: ax.set(xlim=xlim)
         ax.legend()
         ax.set_title('{} counts vs. time'.format(self.name))
+        docstring.doc_display(Main.plot_time)
 
     def plot_radius(self, cumulative=False, squared=True):
+        """
+        {fig}
+        """
         plt.rc('font', size=12)
         df = self.df
-        fig,ax = plt.subplots(figsize=(6,3))
+        fig,ax = plt.subplots(figsize=(6,3), num=self.fignum)
         x = df.radius**2 if squared else df.radius
         hkw = dict(bins=np.linspace(0, 25 if squared else 5, 100), 
                    histtype='step',lw=2,cumulative=cumulative)
@@ -161,6 +170,7 @@ class Main(object):
         ax.set(yscale='log', xlabel='radius**2 [deg^2]' if squared else 'delta [deg]', 
             ylabel='cumulative counts' if cumulative else 'counts'); 
         ax.legend(loc='upper left' if cumulative else 'upper right');
+        docstring.doc_display(Main.plot_radius)
 
 
 ### Code that must be run in FermiTools context to create the database
@@ -253,7 +263,7 @@ def flux_plot( df, ax, ts_max=9, interval=1, step=False, tzero=0, **kwargs):
                 alpha=0.5)
         
         
-class CombinedLightcurves(object):
+class CombinedLightcurves(docstring.Displayer):
     
     defaults = Main.defaults+(
       ('bb_kwargs', dict(fitness_func='likelihood', p0=0.1) , 'Bayesian Block args'),
@@ -276,6 +286,7 @@ class CombinedLightcurves(object):
         """
         #print(f'{sources}, kwargs={kwargs}')
         keyword_options.process(self,kwargs)
+        super().__init__()
         if isinstance(sources, dict):
             sources=[sources]
             
@@ -371,12 +382,16 @@ class CombinedLightcurves(object):
 
     
     def flux_plots(self, ax=None, outdir=None, tzero=0, **kwargs):
+        """
+        {fig}
+        """
         import matplotlib.ticker as ticker
 
-        fig, ax = plt.subplots(figsize=(15,4)) if ax is None else (ax.figure, ax)
+        fig, ax = plt.subplots(figsize=(15,4), num=self.fignum) if ax is None else (ax.figure, ax)
 
         xlim = kwargs.pop('xlim', None)
         ylim = kwargs.pop('ylim', None)
+        yscale=kwargs.pop('yscale','log')
         step_color=kwargs.pop('step_color', 'blue')
         cell_color=kwargs.pop('cell_color', 'lightgrey')
         limit_color=kwargs.pop('limit_color', 'wheat')
@@ -387,7 +402,7 @@ class CombinedLightcurves(object):
                       color=cell_color, lw=1,interval=interval, fmt=' ', limit_color=limit_color)
         flux_plot(self.bb_df,  ax, tzero=tzero,
                   color=step_color,lw=1, fmt='.',interval=interval, step=True)
-        ax.set(xlim=xlim, ylim=ylim)
+        ax.set(xlim=xlim, ylim=ylim, yscale=yscale)
         if kwargs.pop('show_source_name',True):
             ax.text(0.02, 0.88, self.source_name, transform=ax.transAxes)
 
@@ -396,7 +411,8 @@ class CombinedLightcurves(object):
             fig.tight_layout()
             fig.savefig(f'{outdir}/{filename}')
             if self.verbose>0:
-                print(f'Saved figure to {filename}')        
+                print(f'Saved figure to {filename}')  
+        docstring.doc_display(CombinedLightcurves.flux_plots)
     
     def to_galactic(ra,dec):
         """return (l,b) given ra,dec"""

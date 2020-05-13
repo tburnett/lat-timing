@@ -464,13 +464,13 @@ class LightCurve(object):
         ax.set_title(title or f'{data.source_name}, rep {self.rep}')
         ax.grid(alpha=0.5)
         
-    def fit_hists(self, title=None, **hist_kw):
+    def fit_hists(self, title=None, fignum=None, **hist_kw):
         """### Plot distributions of rate, error, pull
         
         Source name:  "{source_name}" 
         Bins fit with {self.rep} model.
         
-        {fig}
+        {fig.html}
         
         """
         import docstring
@@ -479,7 +479,7 @@ class LightCurve(object):
         hkw.update(hist_kw)
 
         df = self.fit_df
-        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(10,3.0), tight_layout=True,)
+        fig, (ax1,ax2,ax3)= plt.subplots(1,3, figsize=(10,3.0), tight_layout=True, num=fignum)
         x = df.t
         y = df.flux
         if self.rep=='poisson': #mean of high, low 
@@ -505,8 +505,9 @@ class LightCurve(object):
         shist(ax1, y, (0.25, 4), 25, 'relative flux', xlog=True).axvline(1, color='grey')
         shist(ax2, yerr*100, (1, 30), 25, 'sigma [%]', xlog=True)
         shist(ax3, (y-1)/yerr, (-6,6), 25,'pull').axvline(0,color='grey')
+        return fig
         #fig.suptitle(title or  f'{data.source_name}, rep {self.rep}')
-        docstring.formatter(self)
+        #docstring.formatter(LightCurve.fit_hists)
 
     def mean_std(self):
         """ return weighted mean and rms"""

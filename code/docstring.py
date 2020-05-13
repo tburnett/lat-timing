@@ -1,10 +1,10 @@
-"""Generate documents for IPython display """
-import os,inspect,string
+"""Generate documents for Jupyter display """
+import os,inspect,string, io
 import IPython.display as display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
+from nbconvert.exporters import ( HTMLExporter,)
 
 def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs):
     """Format and display the docstring, as an alternative to matplotlib inline in jupyter notebooks
@@ -12,8 +12,9 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     Parameters
     ---------
     
-    funct : function object
-        The calling function, used to obtain the docstring
+    funct : function object | dict
+        if a dict, has keys name, doc, locs
+        otherlwise, the calling function, used to obtain is name, the docstring, and locals
     folder_path : string, optional, default 'figs'
     fig_kwargs : dict,  optional
         additional kwargs to pass to the savefig call.
@@ -45,13 +46,22 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     """    
     
     # get docstring from function object
-    assert inspect.isfunction(funct), f'Expected a function: got {funct}'
-    doc = inspect.getdoc(funct)
-        
-    # use inspect to get caller frame, the function name, and locals dict
-    back =inspect.currentframe().f_back
-    name= inspect.getframeinfo(back).function
-    locs = inspect.getargvalues(back).locals.copy() # since may modify
+    expected_keys='doc name locs'.split()
+    if inspect.isfunction(funct): #, f'Expected a function: got {funct}'
+        doc = inspect.getdoc(funct)
+
+        # use inspect to get caller frame, the function name, and locals dict
+        back =inspect.currentframe().f_back
+        name= inspect.getframeinfo(back).function
+        locs = inspect.getargvalues(back).locals.copy() # since may modify
+
+    elif (type(funct) == dict) and (set(expected_keys) == set(funct.keys())):
+        doc=funct['doc']
+        name=funct['name']
+        locs = funct['locs']
+    else:
+        raise Exception(f'Expected a function or a dict with keys {expected_keys}: got {funct}')
+    
     # add kwargs if any
     locs.update(kwargs)
     
@@ -171,6 +181,71 @@ def md_display(text):
     """Add text to the display"""
     display.display(display.Markdown(text+'\n'))
     
+def md_to_html(md_text, filename):
+    """write nbconverted markdown to a file """
+    import json
+    # Generate a json string for a notebook with a single cell in markdown format 
+    # TODO: allow for multiple text strings? 
+    pre = """{
+     "cells": [
+       { 
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": ["""
+    post = """] } ],
+     "metadata": {},
+     "nbformat": 4,
+     "nbformat_minor": 4
+     }
+    """
+    myjson = pre+ ',\n'.join( ['"'+line+r'\n"' for line in md_text.split('\n')] ) + post
+    # check it first
+    try: 
+        json.loads(myjson)
+    except Exception as msg:
+        print(myjson, msg)
+        raise
+    # now pass it nbformat to write as an HtML file
+    exporter = HTMLExporter()
+    output, resources = exporter.from_file(io.StringIO(myjson))
+    with open(filename, 'wb') as f:
+        f.write(output.encode('utf8'))
+
+class Displayer(object):
+    """Base class for display purposes
+    A subclass must run super().__init__(). Then any member function that calls self.display()
+    will have its docstring processed.
+   
+    """
+    def __init__(self, path=None, fignum=1):
+        """
+        path : None or string
+            Path to save figures
+            if None, use figs/<classname>
+            
+        """
+        self.path=path or f'figs/{self.__class__.__name__}'
+        os.makedirs(self.path, exist_ok=True)
+        self._fignum=fignum-1
+    
+    @property
+    def newfignum(self):
+        self._fignum+=1
+        return self._fignum
+    
+    def display(self, **kwargs):                
+        # use inspect to get caller frame, the function name, and locals dict
+        back =inspect.currentframe().f_back
+        name= inspect.getframeinfo(back).function
+        locs = inspect.getargvalues(back).locals.copy() # since may modify
+        
+        # consruct the calling function object to get its docstring
+        funct =eval(f'self.{name}')
+        doc = inspect.getdoc(funct)
+        
+        #print(name,doc,locs.keys())
+        doc_display(dict(name=name, doc=doc, locs=locs), folder_path=self.path, **kwargs)
+    
 def demo_function( xlim=(0,10)):
     r"""
     ### Function generating figures and table output
@@ -180,42 +255,100 @@ def demo_function( xlim=(0,10)):
     * Display head of the dataframe used to make the plots
     {dfhead}
     
-    * Figure 1.
+    * **Figure 1.**  
     Describe analysis for this figure here.
     {fig1}
     Interpret results for Fig. {fig1.number}.  
     
-    * Figure 2.
+    * **Figure 2.**  
     A second figure!
     {fig2}
-    This figure is a sqrt
+    This figure plots a square root
 
     ---
     Check value of the kwarg *test* passed to the formatter: it is "{test:.2f}".
     
     ---
-    Insert some latex to test that it passes unrecognized entries on.
+    Insert some latex to test that it passes unrecognized curly bracket entries on...and that they get rendered!
+    <br>
         \begin{align*}
-        \sin(\theta)^2 + \cos(\theta)^2 =1
+        \sin^2\theta + \cos^2\theta =1
         \end{align*}
     An inline formula: $\frac{1}{2}=0.5$
     """
     plt.rc('font', size=14)
     x=np.linspace(*xlim)
     df= pd.DataFrame([x,x**2,np.sqrt(x)], index='x xx sqrtx'.split()).T
-    dfhead =df.head()
-    fig1,ax=plt.subplots(num=1, figsize=(4,4))
+    dfhead =df.head(2)
+    
+    fig1,ax=plt.subplots(num=1, figsize=(4,3))
     ax.plot(df.x, df.xx)
     ax.set(xlabel='$x$', ylabel='$x^2$', title=f'figure {fig1.number}')
     fig1.caption="""Example caption for Fig. {fig1.number}, which
             shows $x^2$ vs. $x$.    
             <p>A second caption line."""
     
-    fig2,ax=plt.subplots(num=2, figsize=(4,4))
+    fig2,ax=plt.subplots(num=2, figsize=(4,3))
+    fig2.caption='A simple caption.'
     ax.set_title('figure 2')
     ax.plot(df.x, df.sqrtx)
-    ax.set(xlabel = '$x$', ylabel=r'$\sqrt{x}$')
-        
+    ax.set(xlabel = '$x$', ylabel=r'$\sqrt{x}$')      
     
     doc_display(demo_function, test=99)
     
+    
+class DemoClass(Displayer):
+    def __init__(self):
+        super().__init__()
+        
+    def demo(self):
+        r"""### Function generating figures and table output
+
+        Note the value of the arg `xlim = {xlim}`
+
+        * Display head of the dataframe used to make the plots
+        {dfhead}
+
+        * **Figure 1.**  
+        Describe analysis for this figure here.
+        {fig1}
+        Interpret results for Fig. {fig1.number}.  
+
+        * **Figure 2.**  
+        A second figure!
+        {fig2}
+        This figure plots a square root
+
+        ---
+        Check value of the kwarg *test* passed to the formatter: it is "{test:.2f}".
+
+        ---
+        Insert some latex to test that it passes unrecognized curly bracket entries on...and that they get rendered!
+        <br>
+            \begin{align*}
+            \sin^2\theta + \cos^2\theta =1
+            \end{align*}
+        An inline formula: $\frac{1}{2}=0.5$
+        """
+        plt.rc('font', size=14)
+        x=np.linspace(*xlim)
+        df= pd.DataFrame([x,x**2,np.sqrt(x)], index='x xx sqrtx'.split()).T
+        dfhead =df.head(2)
+
+        fig1,ax=plt.subplots(num=self.newfignum, figsize=(4,3))
+        ax.plot(df.x, df.xx)
+        ax.set(xlabel='$x$', ylabel='$x^2$', title=f'figure {fig1.number}')
+        fig1.caption="""Example caption for Fig. {fig1.number}, which
+                shows $x^2$ vs. $x$.    
+                <p>A second caption line."""
+
+        fig2,ax=plt.subplots(num=self.newfignum, figsize=(4,3))
+        fig2.caption='A simple caption.'
+        ax.set_title('figure 2')
+        ax.plot(df.x, df.sqrtx)
+        ax.set(xlabel = '$x$', ylabel=r'$\sqrt{x}$')   
+        self.display()
+    
+        doc_display(demo_function, test=99)
+        
+        
