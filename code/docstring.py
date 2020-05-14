@@ -10,7 +10,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     """Format and display the docstring, as an alternative to matplotlib inline in jupyter notebooks
     
     Parameters
-    ---------
+    ----------
     
     funct : function object | dict
         if a dict, has keys name, doc, locs
@@ -18,7 +18,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     folder_path : string, optional, default 'figs'
     fig_kwargs : dict,  optional
         additional kwargs to pass to the savefig call.
-    df_kwargs : dict, optional
+    df_kwargs : dict, optional, default {"float_format":lambda x: f'{x:.3f}', "notebook":True, "max_rows":10, "show_dimensions":}
         additional kwargs to pass to the to_html call for a DataFrame
     kwargs : used only to set variables referenced in the docstring.    
     
@@ -43,8 +43,11 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     Unrecognized entries are ignored, allowing latex expressions. (The string must be preceded by an "r"). In case of
     confusion, double the curly brackets.
 
-    """    
-    
+    """  
+    # check kwargs
+    dfkw = dict(float_format=lambda x: f'{x:.3f}', notebook=True, max_rows=10, show_dimensions=True, justify='left')
+    dfkw.update(df_kwargs)
+
     # get docstring from function object
     expected_keys='doc name locs'.split()
     if inspect.isfunction(funct): #, f'Expected a function: got {funct}'
@@ -58,7 +61,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     elif (type(funct) == dict) and (set(expected_keys) == set(funct.keys())):
         doc=funct['doc']
         name=funct['name']
-        locs = funct['locs']
+        locs = funct['locs'].copy()
     else:
         raise Exception(f'Expected a function or a dict with keys {expected_keys}: got {funct}')
     
@@ -93,6 +96,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
                 plt.close(fig) 
 
                 # add the HTML as an attribute, to insert the image, including optional caption
+
                 self._html =  f'<figure> <img src="{fn}" alt="Figure {n}">'\
                         f' <figcaption>{caption}</figcaption>'\
                         '</figure>'
@@ -114,9 +118,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
             return self.__str__()
         def __str__(self):
             if not hasattr(self, '_html'):
-                kwargs = dict(float_format=lambda x: f'{x:.3f}', notebook=True)
-                kwargs.update(df_kwargs)
-                self._html = self._df.to_html(**kwargs)                
+                self._html = self._df.to_html(**dfkw) # self._df._repr_html_()                
             return self._html
 
             
@@ -228,7 +230,6 @@ class Displayer(object):
         os.makedirs(self.path, exist_ok=True)
         self._fignum=fignum-1
     
-    @property
     def newfignum(self):
         self._fignum+=1
         return self._fignum
@@ -237,9 +238,9 @@ class Displayer(object):
         # use inspect to get caller frame, the function name, and locals dict
         back =inspect.currentframe().f_back
         name= inspect.getframeinfo(back).function
-        locs = inspect.getargvalues(back).locals.copy() # since may modify
+        locs = inspect.getargvalues(back).locals # since may modify
         
-        # consruct the calling function object to get its docstring
+        # construct the calling function object to get its docstring
         funct =eval(f'self.{name}')
         doc = inspect.getdoc(funct)
         
@@ -302,53 +303,86 @@ class DemoClass(Displayer):
         super().__init__()
         
     def demo(self):
-        r"""### Function generating figures and table output
-
-        Note the value of the arg `xlim = {xlim}`
-
-        * Display head of the dataframe used to make the plots
-        {dfhead}
-
-        * **Figure 1.**  
-        Describe analysis for this figure here.
+        r"""### Formatting summary
+        
+        This is generated using a member function of a subclass of `docstring.Displayer`.
+        There are three elements in such a function: the docstring, written in 
+        markdown, containing 
+        local names in curly-brackets, the code, and a final call `self.display()`.  
+        Unlike a formatted string, entries in curly brackets cannot be expressions.
+        
+        #### Local variables  
+        Any variable, say from an expression in the code `q=1/3`, can be interpreted
+        with `"q={{q:.3f}}"`, resulting in  
+        q={q:.3f}.
+    
+        
+        #### Figures
+        
+        Any number of Matplotlib Figure objects can be added, with unique numbers.
+        An entry "{{fig1}}", along with code that defines `fig1` like this:
+        ```
+        x = np.linspace(0,10)
+        fig1,ax=plt.subplots(num=self.newfignum(), figsize=(4,3))
+        ax.plot(x, x**2)
+        ax.set(xlabel='$x$', ylabel='$x^2$', title=f'figure {{fig1.number}}')
+        fig1.caption='''Caption for Fig. {fig1.number}, which
+                shows $x^2$ vs. $x$.'''
+        ```
+        produces:
+        
         {fig1}
-        Interpret results for Fig. {fig1.number}.  
-
-        * **Figure 2.**  
-        A second figure!
-        {fig2}
-        This figure plots a square root
-
-        ---
-        Check value of the kwarg *test* passed to the formatter: it is "{test:.2f}".
-
-        ---
-        Insert some latex to test that it passes unrecognized curly bracket entries on...and that they get rendered!
-        <br>
+        
+        The display processing replaces the `fig1` reference in a copy of `locals()`
+        with a object that implements a `__str__()` function returning an HTML reference 
+        to a saved png representation of the figure.   
+        Note the convenience of defining a caption by adding the text as an attribute of
+        the Figure object.  
+        Also, the `self.newfignum()` returns a new figure number.
+        
+        #### DataFrames
+        A `DataFrame` object is treated similarly. 
+        
+        The code
+        ```
+        df = pd.DataFrame.from_dict(dict(x=x, xx=x**2)).T
+        
+        ```
+        
+        <br>Results in "{{df}}" being replaced with
+        {df}
+    
+        #### LaTex 
+        Jupyter-style markdown can contain LaTex expressions. For this, it is 
+        necessary that the docstring be preceded by an "r". So,
+        ```
+        \begin{{align*}}
+        \sin^2\theta + \cos^2\theta =1
+        \end{{align*}}
+        ```
+        
+        <br>Results in:   
             \begin{align*}
             \sin^2\theta + \cos^2\theta =1
             \end{align*}
-        An inline formula: $\frac{1}{2}=0.5$
+        
+        ---
         """
+        q = 1/3
+        xlim=(0,10)
         plt.rc('font', size=14)
         x=np.linspace(*xlim)
         df= pd.DataFrame([x,x**2,np.sqrt(x)], index='x xx sqrtx'.split()).T
         dfhead =df.head(2)
 
-        fig1,ax=plt.subplots(num=self.newfignum, figsize=(4,3))
-        ax.plot(df.x, df.xx)
+        fig1,ax=plt.subplots(num=self.newfignum(), figsize=(4,3))
+        ax.plot(x, x**2)
         ax.set(xlabel='$x$', ylabel='$x^2$', title=f'figure {fig1.number}')
-        fig1.caption="""Example caption for Fig. {fig1.number}, which
+        fig1.caption="""Caption for Fig. {fig1.number}, which
                 shows $x^2$ vs. $x$.    
-                <p>A second caption line."""
-
-        fig2,ax=plt.subplots(num=self.newfignum, figsize=(4,3))
-        fig2.caption='A simple caption.'
-        ax.set_title('figure 2')
-        ax.plot(df.x, df.sqrtx)
-        ax.set(xlabel = '$x$', ylabel=r'$\sqrt{x}$')   
+               ."""
+        
+        df = pd.DataFrame.from_dict(dict(x=x, xx=x**2))
+        dfhead = df.head()
+        
         self.display()
-    
-        doc_display(demo_function, test=99)
-        
-        
