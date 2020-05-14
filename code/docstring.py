@@ -183,33 +183,44 @@ def md_display(text):
     """Add text to the display"""
     display.display(display.Markdown(text+'\n'))
     
-def md_to_html(md_text, filename):
-    """write nbconverted markdown to a file """
+def md_to_html(output, filename):
+    """write nbconverted markdown to a file 
+    
+    parameters
+    ----------
+    output : string | IPython.utils.capture.CapturedIO object
+        if not a string extract the markdown from each of the ca
+    """
     import json
     # Generate a json string for a notebook with a single cell in markdown format 
     # TODO: allow for multiple text strings? 
-    pre = """{
-     "cells": [
-       { 
-        "cell_type": "markdown",
-        "metadata": {},
-        "source": ["""
-    post = """] } ],
-     "metadata": {},
-     "nbformat": 4,
-     "nbformat_minor": 4
-     }
-    """
-    myjson = pre+ ',\n'.join( ['"'+line+r'\n"' for line in md_text.split('\n')] ) + post
-    # check it first
-    try: 
-        json.loads(myjson)
-    except Exception as msg:
-        print(myjson, msg)
-        raise
+    if type(output)==str:
+        md_text=output
+    elif hasattr(output, 'outputs'):
+        md_text=''
+        for t in output.outputs:            
+            md_text += t.data['text/markdown']
+    else:
+        raise Exception(f'output not recognized: {output.__class__} not string or CapturedIO object?')
+    
+    class Dict(dict):
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+            self.update(kwargs)
+    nb = Dict(
+            cells= [Dict(cell_type="markdown", 
+                         metadata={}, 
+                         source=md_text,
+                        )
+                   ],
+            metadata={},
+            nbformat=4,
+            nbformat_minor=4,
+            )
+
     # now pass it nbformat to write as an HtML file
     exporter = HTMLExporter()
-    output, resources = exporter.from_file(io.StringIO(myjson))
+    output, resources = exporter.from_notebook_node(nb) 
     with open(filename, 'wb') as f:
         f.write(output.encode('utf8'))
 

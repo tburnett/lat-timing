@@ -210,7 +210,7 @@ class LightCurveDisplay(docstring.Displayer):
         if fexp.std()<0.01:
             fig = f'Constant: std={fexp.std():.2f}<0.01'
         else:
-            fig,ax = plt.subplots(figsize=(4,2), num=self.newfignum)
+            fig,ax = plt.subplots(figsize=(4,2), num=self.newfignum())
             ax.hist(fexp, 100)
             ax.grid(alpha=0.5)
             ax.set(xlabel='exposure factor')
@@ -225,12 +225,12 @@ class LightCurveDisplay(docstring.Displayer):
         {fig2}
 
         """
-        fig1,ax1 = plt.subplots(figsize=(12,4),  num=self.newfignum)
+        fig1,ax1 = plt.subplots(figsize=(12,4),  num=self.newfignum())
         fig1.caption = """Measured flux per day"""
         self.lc.flux_plot(ax=ax1,title=None)
         
         
-        self.lc.fit_hists(fignum=self.newfignum)
+        self.lc.fit_hists(fignum=self.newfignum())
         fig2=plt.gcf()
         fig2.caption='The distributions of the Poisson fit results.'
         
