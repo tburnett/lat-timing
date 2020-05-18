@@ -1,17 +1,18 @@
-"""Generate documents for Jupyter display """
-import os,inspect,string, io
+"""Generate documents for Jupyter display 
+"""
+
+import os, inspect, string, io, datetime
 import IPython.display as display
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from nbconvert.exporters import ( HTMLExporter,)
+
 
 def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs):
     """Format and display the docstring, as an alternative to matplotlib inline in jupyter notebooks
     
     Parameters
-    ----------
-    
+    ----------    
     funct : function object | dict
         if a dict, has keys name, doc, locs
         otherlwise, the calling function, used to obtain is name, the docstring, and locals
@@ -22,7 +23,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
         additional kwargs to pass to the to_html call for a DataFrame
     kwargs : used only to set variables referenced in the docstring.    
     
-    Expect to be called from a function or class method that may generate one or more figures.
+    Expect this to be called from a function or class method that may generate one or more figures.
     It takes the function's docstring, assumed to be in markdown, and applies format() to format values of any locals. 
     
     Each Figure to be displayed must have a reference in the local namespace, say `fig`, and have a unique number. 
@@ -30,7 +31,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
     In addition, if an attribute "caption" is found in a Figure object, its text will be displayed as a caption.
     
     Similarly, if there is a reference to a pandas DataFrame, say a local variable `df`, then any occurrence of `{df}`
-    will be replaced with an HTML table.
+    will be replaced with an HTML table, truncated according to the notebook format.
     
     A possibly important detail, given that The markdown processor expects key symbols, like #, to be the first on a line:
     Docstring text is processed by inspect.cleandoc, which cleans up indentation:
@@ -45,7 +46,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
 
     """  
     # check kwargs
-    dfkw = dict(float_format=lambda x: f'{x:.3f}', notebook=True, max_rows=10, show_dimensions=True, justify='left')
+    dfkw = dict(float_format=lambda x: f'{x:.3f}', notebook=True, max_rows=10, show_dimensions=False, justify='right')
     dfkw.update(df_kwargs)
 
     # get docstring from function object
@@ -99,7 +100,7 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
 
                 self._html =  f'<figure> <img src="{fn}" alt="Figure {n}">'\
                         f' <figcaption>{caption}</figcaption>'\
-                        '</figure>'
+                        '</figure>\n'
             return self._html
         
         def __repr__(self):
@@ -177,11 +178,13 @@ def doc_display(funct, folder_path='figs', fig_kwargs={}, df_kwargs={}, **kwargs
 
     # pass to IPython's display as markdown
     display.display(display.Markdown(docx))
+    
+    return docx
 
 
-def md_display(text):
+def markdown(text):
     """Add text to the display"""
-    display.display(display.Markdown(text+'\n'))
+    display.display(display.Markdown(text))
     
 def md_to_html(output, filename):
     """write nbconverted markdown to a file 
@@ -189,19 +192,18 @@ def md_to_html(output, filename):
     parameters
     ----------
     output : string | IPython.utils.capture.CapturedIO object
-        if not a string extract the markdown from each of the ca
+        if not a string extract the markdown from each of the outputs list 
     """
-    import json
-    # Generate a json string for a notebook with a single cell in markdown format 
-    # TODO: allow for multiple text strings? 
+    from nbconvert.exporters import  HTMLExporter
+       
     if type(output)==str:
         md_text=output
     elif hasattr(output, 'outputs'):
         md_text=''
         for t in output.outputs:            
-            md_text += t.data['text/markdown']
+            md_text += '\n\n'+t.data['text/markdown']
     else:
-        raise Exception(f'output not recognized: {output.__class__} not string or CapturedIO object?')
+        raise Exception(f'output not recognized: {output.__class__} not a string or CapturedIO object?')
     
     class Dict(dict):
         def __init__(self, **kwargs):
@@ -218,7 +220,7 @@ def md_to_html(output, filename):
             nbformat_minor=4,
             )
 
-    # now pass it nbformat to write as an HtML file
+    # now pass it to nbconvert to write as an HTML file
     exporter = HTMLExporter()
     output, resources = exporter.from_notebook_node(nb) 
     with open(filename, 'wb') as f:
@@ -228,36 +230,99 @@ class Displayer(object):
     """Base class for display purposes
     A subclass must run super().__init__(). Then any member function that calls self.display()
     will have its docstring processed.
+    
+    Implements the with construction. 
    
     """
-    def __init__(self, path=None, fignum=1):
+    def __init__(self, path=None, fignum=1, html_file=None, pdf_file=None):
         """
         path : None or string
             Path to save figures
             if None, use figs/<classname>
-            
+        fignum : optional, default 1
+            First figure number to use
+        html_file : optional, default None
+            if set, save the accumulated output to an HTML file when closed
+        pdf_file : optional default None
+            If set, save the accumulated docstring output to the PDF file when closed.
         """
         self.path=path or f'figs/{self.__class__.__name__}'
         os.makedirs(self.path, exist_ok=True)
         self._fignum=fignum-1
+
+        self.date=str(datetime.datetime.now())[:16]
+        self.pdf_file=pdf_file
+        self.html_file=html_file
+        self.data = ''
+        
+    def __enter__(self): return self
     
+    def __exit__(self, exc_type, exc_value, traceback):
+        if self.pdf_file:
+            print('*** PDF generation not yet implemented!')
+        if self.html_file:
+            md_to_html(self.data, self.html_file )
+#             self.markdown(f'---\nDocument saved to {self.html_file}')
+
+            
+    def markdown(self, text, clean=True):
+        """Add md text to the display"""
+        if clean:
+            text= inspect.cleandoc(text)
+        # make sure clean separation before and after
+        display.display(display.Markdown(text)) 
+        self.data += '\n\n'+ text
+                        
+    
+    def footer(self, source_file):
+        # This is Fermi-LAT specific, assuming run at SLAC
+        try:
+            from __init__ import repository_name, SLAC_path, github_path
+        except:
+            return '*footer expects defining stuff in local __init__.py!*'
+        doc_path = '' 
+        if self.html_file:
+            curpath = os.getcwd()
+            rep_path, rep_name = os.path.split(SLAC_path)
+            i = curpath.find(rep_name)
+            j =curpath.find('/')+i
+            if i==-1 or j==-1:
+                doc_path = f'Problem construcing SLAC doc'
+            else:
+                rep_path+curpath[j-1:]+'/'+self.html_file+'?skipDecoration'
+                doc_path= f'[Document at SLAC (Fermi access)]({rep_path+curpath[j-1:]}/{self.html_file}?skipDecoration)'        
+        return self.markdown(
+            f"""\
+            ---
+            This code, `{source_file}`, is part of my repository `{repository_name}`,
+            and can be found at [github]({github_path}/{source_file})
+            or, the current version (Fermi-LAT access) at [SLAC]({SLAC_path}/{source_file}?skipDecoration).
+            
+            (Document created using [`docstring.py`]({github_path}/code/docstring.py).
+            
+            {doc_path}
+            """
+            )                       
+
     def newfignum(self):
         self._fignum+=1
         return self._fignum
     
-    def display(self, **kwargs):                
+    def display(self,  **kwargs):                
         # use inspect to get caller frame, the function name, and locals dict
         back =inspect.currentframe().f_back
         name= inspect.getframeinfo(back).function
-        locs = inspect.getargvalues(back).locals # since may modify
+        locs = inspect.getargvalues(back).locals
         
         # construct the calling function object to get its docstring
         funct =eval(f'self.{name}')
         doc = inspect.getdoc(funct)
         
-        #print(name,doc,locs.keys())
-        doc_display(dict(name=name, doc=doc, locs=locs), folder_path=self.path, **kwargs)
-    
+        #  
+        md_data = doc_display(dict(name=name, doc=doc, locs=locs), 
+                    folder_path=self.path, **kwargs)
+        self.data += '\n\n'+md_data
+        
 def demo_function( xlim=(0,10)):
     r"""
     ### Function generating figures and table output

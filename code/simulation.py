@@ -195,17 +195,20 @@ class SimulationFromData(docstring.Displayer, list):
 class LightCurveDisplay(docstring.Displayer):
     """ Special class to display light curve info"""
     
-    def __init__(self, light_curve, title='Light curve', path=None):
+    def __init__(self, light_curve, title='## Light curve', path=None):
         """
         {title}
+        """
+        super().__init__(path=path)        
+        self.lc = light_curve
+        self.display()
         
+    def exposure(self):
+        """
         #### Exposure  
         Exposure per day, relative to average.
         {fig}
         """
-        super().__init__(path=path)        
-        self.lc = light_curve
-
         fexp=self.lc.dataframe.fexp.values
         if fexp.std()<0.01:
             fig = f'Constant: std={fexp.std():.2f}<0.01'
@@ -243,7 +246,7 @@ class LightCurveDisplay(docstring.Displayer):
         * **Head of the cell fit data frame**
         {dfhead}
         The "poiss_x" columns are the three poisson-like parameters:
-        sp, e, and b are peak value, equivalent counts, and background, respectively.
+        "sp", "e", and "b" are peak value, equivalent counts, and background, respectively.
 
         * **Statistics**
         {stats}
@@ -260,4 +263,7 @@ class LightCurveDisplay(docstring.Displayer):
 
         self.display()
 
-    
+    def all_plots(self):
+        self.exposure()
+        self.statistics_summary()
+        self.summary_plots()

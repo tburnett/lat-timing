@@ -387,7 +387,7 @@ class CombinedLightcurves(docstring.Displayer):
         """
         import matplotlib.ticker as ticker
 
-        fig, ax = plt.subplots(figsize=(15,4), num=self.fignum) if ax is None else (ax.figure, ax)
+        fig, ax = plt.subplots(figsize=(15,4), num=self.newfignum()) if ax is None else (ax.figure, ax)
 
         xlim = kwargs.pop('xlim', None)
         ylim = kwargs.pop('ylim', None)
@@ -405,6 +405,7 @@ class CombinedLightcurves(docstring.Displayer):
         ax.set(xlim=xlim, ylim=ylim, yscale=yscale)
         if kwargs.pop('show_source_name',True):
             ax.text(0.02, 0.88, self.source_name, transform=ax.transAxes)
+        fig.caption = kwargs.pop('caption', '')
 
         if outdir is not None:
             filename = self.source_name.replace(' ', '_',).replace('+','p')+'.png'
@@ -412,7 +413,7 @@ class CombinedLightcurves(docstring.Displayer):
             fig.savefig(f'{outdir}/{filename}')
             if self.verbose>0:
                 print(f'Saved figure to {filename}')  
-        docstring.doc_display(CombinedLightcurves.flux_plots)
+        self.display()
     
     def to_galactic(ra,dec):
         """return (l,b) given ra,dec"""

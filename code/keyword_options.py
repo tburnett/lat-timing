@@ -50,7 +50,8 @@ def decorate(defaults):
             if len(str(value))>10: s += indent + 25*' '
             s += ' '+ (indent+25*' ').join(description.split('\n'))
         if func.__doc__ is None: func.__doc__ = ''
-        func.__doc__ += s+hbar
+        #func.__doc__ += s+hbar
+        func._defaults_ = s+hbar
         return func
     return decorator
 

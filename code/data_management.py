@@ -94,9 +94,11 @@ class TimedData(object):
            
     def __repr__(self):
         b = self.edges
+        years = (b[-1]-b[0])/365.25
         return  f'Source "{self.source_name}" at (l,b)= ({self.l:.2f},{self.b:.2f}), radius= {self.radius}  '\
                 f'\n     Data class: {self.__class__.__name__}  '\
-                f'\n     {len(b)} cells, size {self.interval} days from {b[0]:.1f} to {b[-1]:.1f}  '
+                f'\n     {len(b)} cells, size {self.interval} day(s),'\
+                f' from {b[0]:.1f} to {b[-1]:.1f} ({years:.1f} years).  '
        
     def _default_bins(self):
         #set up default bins from exposure; adjust stop to come out even
