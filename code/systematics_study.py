@@ -37,12 +37,13 @@ class GemingaStudies(docstring.Displayer):
     @keyword_options.decorate(defaults)
     def __init__(self, gdata:None="GemingaData object", **kwargs):
         """
-        ## Systematic studies with the Geminga data
+        ## Fermi-LAT Exposure Systematics 
         <p style="text-align: right;">{self.date}</p>
+        This study uses, and for now, is specific to {self.source_name} data.
         We have 11 years, or ~4K independent daily measurments of the flux, which we can use to
         check the error estimates for systematics, especially the exposure. 
             
-        - Geminga dataset:  
+        - Dataset:  
         {self.gdata}    
         - 1-day light curve:  
         {self.lc}
@@ -53,7 +54,8 @@ class GemingaStudies(docstring.Displayer):
         keyword_options.process(self,kwargs)
 
         # get the geminga data, perhaps generating
-        self.gdata = gdata or GemingaData()        
+        self.gdata = gdata or GemingaData()
+        self.source_name = gdata.source_name
        
         #create a dataframe of the light curve based on 1-day fits
         self.lc = self.gdata.light_curve(1)
@@ -67,9 +69,9 @@ class GemingaStudies(docstring.Displayer):
 
         self.display()
 
-    def plot_rms_vs_interval(self, nfit=6):
+    def plot_rms_vs_cell_size(self, nfit=6):
         """
-        ### The width of the pull vs interval size
+        ### The width of the pull vs cell size
         
         Here I analyze the "pull", or normalized deviation of the flux measurement compared
         with the expected 1.0. The likelihood is of course Poissonian. The mean 
@@ -201,3 +203,79 @@ class GemingaStudies(docstring.Displayer):
         fig2=fft_plot()
         self.display()
         
+    def phase_plots(self):
+        """
+        ### Phase Analysis
+        The discovery of long-tem periodicty in the correlations, especially a yearly component, suggests that
+        it could be corrected. Here I create phase plots to measure such a correction
+        
+        First try the precession period:
+        {fig1}
+        
+        Not so dramatic: how about a quarter-yearly interval, the second-largest peak?
+        {fig2}
+        
+        This should also show up in the yearly interval
+        {fig3}
+        Bingo! Obvious time-of-year dependence.
+        
+        Compare with the basic pull statistics:
+        {fig4}
+        The sigma, in relative flux, is {sigmean_pct:.1f}%. The systematic in the measured flux corresponds to {systematic_pct:.1f}%.
+        So as yearly variation of the order of the sigma may be comparable with the systematic.
+        """
+        df = self.lc.dataframe # get 1-day light curve, with pulls calculated
+        assert 'pull' in df, 'Expected pull to be calculated'
+                
+        def phase_plot(period, bins=50):
+            phase = np.mod(df.t, period)
+            phase_bin = np.digitize(phase, np.linspace(0,period,bins+1))
+            g = df.groupby(phase_bin)
+            fig,ax = plt.subplots(figsize=(8,3), num=self.newfignum())
+            pp = g['pull']
+            y = pp.agg(np.mean); ystd = pp.agg(np.std) ; N=pp.agg(len)
+            ax.errorbar(x=(np.arange(bins)+0.5)/bins, y=y,  yerr=ystd/np.sqrt(N), fmt=' ', marker='o');
+            ax.set(xlabel=f'phase within {period:.2f} day period', xlim=(0,1),
+                  ylabel='Deviation in sigma units',)
+            ax.axhline(0, color='grey')
+            ax.grid(alpha=0.5)
+            return fig
+            
+        fig1 = phase_plot(52.1)
+        fig2 = phase_plot(365.25/4)
+        fig3 = phase_plot(365.25)
+        
+        fig4 = self.lc.fit_hists(fignum=self.newfignum())
+        sigmean_pct= df.sigma.mean() * 100
+        systematic_pct = (df.pull.std()-1)*100
+        
+        self.display()
+        
+        
+    def footer(self, source_file):
+        # This is Fermi-LAT specific, assuming run at SLAC
+        try:
+            from __init__ import repository_name, SLAC_path, github_path
+        except:
+            return '*footer expects defining stuff in local __init__.py!*'
+        doc_path = '' 
+        if self.html_file:
+            curpath = os.getcwd()
+            rep_path, rep_name = os.path.split(SLAC_path)
+            i = curpath.find(rep_name)
+            j =curpath.find('/')+i
+            if i==-1 or j==-1:
+                doc_path = f'Problem construcing SLAC doc'
+            else:
+                rep_path+curpath[j-1:]+'/'+self.html_file+'?skipDecoration'
+                doc_path= f'[Document at SLAC (Fermi-LAT access)]({rep_path+curpath[j-1:]}/{self.html_file}?skipDecoration)'        
+        return self.markdown(
+            f"""\
+            ---
+            This code, `{source_file}`, is part of my repository `{repository_name}`,
+            and can be found at [github]({github_path}/{source_file})
+            or, the current version (Fermi-LAT access) at [SLAC]({SLAC_path}/{source_file}?skipDecoration).
+
+            (Document created using [`docstring.py`]({github_path}/code/docstring.py) {doc_path}
+            """
+            )   

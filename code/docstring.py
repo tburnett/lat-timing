@@ -255,6 +255,7 @@ class Displayer(object):
         self.html_file=html_file
         self.data = ''
         
+    # Support the 'with ...'
     def __enter__(self): return self
     
     def __exit__(self, exc_type, exc_value, traceback):
@@ -272,39 +273,8 @@ class Displayer(object):
         # make sure clean separation before and after
         display.display(display.Markdown(text)) 
         self.data += '\n\n'+ text
-                        
-    
-    def footer(self, source_file):
-        # This is Fermi-LAT specific, assuming run at SLAC
-        try:
-            from __init__ import repository_name, SLAC_path, github_path
-        except:
-            return '*footer expects defining stuff in local __init__.py!*'
-        doc_path = '' 
-        if self.html_file:
-            curpath = os.getcwd()
-            rep_path, rep_name = os.path.split(SLAC_path)
-            i = curpath.find(rep_name)
-            j =curpath.find('/')+i
-            if i==-1 or j==-1:
-                doc_path = f'Problem construcing SLAC doc'
-            else:
-                rep_path+curpath[j-1:]+'/'+self.html_file+'?skipDecoration'
-                doc_path= f'[Document at SLAC (Fermi access)]({rep_path+curpath[j-1:]}/{self.html_file}?skipDecoration)'        
-        return self.markdown(
-            f"""\
-            ---
-            This code, `{source_file}`, is part of my repository `{repository_name}`,
-            and can be found at [github]({github_path}/{source_file})
-            or, the current version (Fermi-LAT access) at [SLAC]({SLAC_path}/{source_file}?skipDecoration).
-            
-            (Document created using [`docstring.py`]({github_path}/code/docstring.py).
-            
-            {doc_path}
-            """
-            )                       
 
-    def newfignum(self):
+    def newfignum(self) -> "a new figure number":
         self._fignum+=1
         return self._fignum
     
