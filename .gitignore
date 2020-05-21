@@ -3,4 +3,6 @@
 nohup.out
 .ipynb_checkpoints/*
 godot
-data
+notebooks/code development"
+code/stats
+

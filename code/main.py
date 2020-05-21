@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from astropy.coordinates import SkyCoord
-import keyword_options, docstring
+import keyword_options#, docstring
 
 from data_management import TimedData, TimedDataArrow
 from weightman import WeightedData, WeightModel
@@ -17,7 +17,7 @@ from light_curve import LightCurve, BayesianBlocks
 
 
 
-class Main(docstring.Displayer):
+class Main(object):#docstring.Displayer):
     """Top-level processing for photon data
     """
  
@@ -263,7 +263,7 @@ def flux_plot( df, ax, ts_max=9, interval=1, step=False, tzero=0, **kwargs):
                 alpha=0.5)
         
         
-class CombinedLightcurves(docstring.Displayer):
+class CombinedLightcurves(object): #docstring.Displayer):
     
     defaults = Main.defaults+(
       ('bb_kwargs', dict(fitness_func='likelihood', p0=0.1) , 'Bayesian Block args'),
