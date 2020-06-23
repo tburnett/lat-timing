@@ -10,7 +10,7 @@ __docs__=['Development']
 
 from jupydoc import DocPublisher
 
-from utilities import phase_plot, poiss_pars_hist, GammaData
+from utilities import phase_plot, poiss_pars_hist #, GammaData
 #from utilities import PoissonTable
    
 class Development(DocPublisher): 

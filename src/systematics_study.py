@@ -11,8 +11,9 @@ __docs__=['SystematicAnalysis']
 
 
 from jupydoc import DocPublisher
-from lat_timing import (main, keyword_options)
-from utilities import phase_plot
+from lat_timing import Main
+
+from utilities import (phase_plot , keyword_options)
 
 
 
