@@ -36,14 +36,13 @@ class SystematicAnalysis(DocPublisher):
     def data_set(self): 
         """Data Set
 
-        Loaded **{self.source_name}** light curve  <a href="{link}">generated here.</a>: 
+        Loaded **{self.source_name}** photon data <a href="{link}">generated here.</a>: 
         {lc_df}
 
         Added *pull* distributions.
         """
-        self.gdata = self.docman('GammaData.Geminga', as_client=True)
-        link = self.docman.link
-        self.gdata()
+        
+        self.gdata, link = self.docman.client('GammaData.Geminga')
         self.light_curve = self.gdata.light_curve
         self.lc_df = lc_df = self.light_curve.dataframe
         lc_df['sigma'] = lc_df.errors.apply(lambda x: 0.5*(x[0]+x[1]))
