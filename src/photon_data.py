@@ -152,7 +152,7 @@ class GammaData(DocPublisher):
         """Light curve data
 
         A "light curve" is generated from the cell data, fitting each cell to  a poisson-like function.
-        This is the contents of the `LightCurve` the poisson fitter.
+        This is the contents of the `LightCurve` with the poisson fitter.
         
         {light_curve_info}
         {lc_df}
