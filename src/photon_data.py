@@ -2,16 +2,16 @@
 package dev initialization
 """
 import os, sys
+import pickle
 import numpy as np
 import matplotlib.pylab as plt
 import pandas as pd
 
 from jupydoc import DocPublisher
-from lat_timing import (Main, LightCurve)
+from lat_timing import (TimedDataX, LightCurve, LightCurveX)
+# from lat_timing import (Main, LightCurve, WeightedDataX, BinnedWeights)
 
 __docs__ = ['GammaData']
-
-#from utilities import phase_plot, poiss_pars_hist
 
    
 class GammaData(DocPublisher): 
@@ -19,18 +19,20 @@ class GammaData(DocPublisher):
     title: Photon data setup
    
     sections:
-        title_page
-        data_reduction [data_load ]
-
+         data_summary [read_data photon_data cell_data light_curve_data ] 
 
     source_name: Geminga
     data_path: $HOME/work/lat/data/photons
 
     """
+            
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def data_reduction(self):
+        # source_name is the version
+        self.source_name = self.version or self.source_name
+
+    def data_summary(self):
         r"""Data reduction
 
         There are five stages:
@@ -48,7 +50,7 @@ class GammaData(DocPublisher):
 
         3. **cells**: This is the basic partition in time, for studying time behavior. We usually
         use seconds for this. A final input is from the effective area and exposure, to normaize counts to
-        flux. Each cell is then: 
+        flux. Each cell has then: 
           * central time
           * time inteval
           * exposure factor
@@ -58,101 +60,199 @@ class GammaData(DocPublisher):
         background, by optimizing an estimator function. Here we restrict to using the likelihood derived by
         M. Kerr. Per cell, it is:
         \begin{align*}
-        \log\mathcal{L}(\alpha,\beta\ |\ {{w}}) = \sum_{w}  \log \bigg( 1 + \alpha\ w + \beta\ (1-w) \bigg) 
+        \log\mathcal{L}(\alpha,\beta\ |\ {{w}}) = \sum_{w}  \log \big( 1 + \alpha\ w + \beta\ (1-w) \big) 
         -\alpha S - \beta B
         \end{align*}                
-        Here the likelihood is function of the relative flux parameters $\alpha$ and $\beta$, given the set of weights $w$. $S$ and $B$ are expections for the flux relative to the averages over the 
-        full dataset. For our case here, we fix $\beta$ to its expected zero. $S$ is proportional 
+        Here the likelihood is a function of the relative flux parameters $\alpha$ and $\beta$, given the set of weights $w$. $S$ and $B$ are expectations for the flux relative to the averages over the 
+        full dataset. For this case, we fix $\beta$ to its expected zero. $S$ is proportional 
         to the exposure, converting counts to flux. 
         <br><br>This likelihood function is approximated by a Poisson-like function.
 
         #### Specified source name: **{self.source_name}**
 
-        Data file `{self.datafile}` exists? {self.fileok}
+        Contents of the folder with source data `{self.source_data_path}`
+      
+        {contents}
+        
         """
+
         #-------------------------------------------------------------------
         # check for data
-        self.datafile = f'{os.path.expandvars(self.data_path)}/{self.source_name}.pkl'
-        self.fileok =  os.path.isfile(self.datafile)
+        self.source_data_path = f'{os.path.expandvars(self.data_path)}/{self.source_name}'
+        contents = self.shell(f'ls -l {self.source_data_path}')
+        self.fileok =  os.path.isdir(self.source_data_path)
+        if not self.fileok: 
+                raise Exception(f'Failed to find the weighted photon data {self.source_data_path}')
+        self.publishme()
+
+    def read_data(self):
+        """Read in saved data
+
+        `TimeData` serialization found as dict in file <samp>{filename}</samp>
+
+        """
+        
+        filename = self.source_data_path+'/time_data.pkl'
+  
+        self.timed_data = TimedDataX(filename)
+
         #-------------------------------------------------------------------
         self.publishme()
 
-    def data_load(self):
-        """Load data
-        
-        * Data source:
-        {data_source}
-        
-        * **photon data**: 
-        {photons_head}
+    def photon_data(self):
+        """Photon data
 
-        * **light curve**
-        {self.light_curve}
+        This is a list of every photon in a valid time range, with time in MJD, energy/event type indicated
+        by the band, position on the sky by a pixel index, and the radius and weight as shown.
+        {photons}
+
+        {fig1}
+        """
+        photons = self.timed_data.photon_data
+        fig1, axx = plt.subplots(1,3, num=1, figsize=(10,3))
+        hkw = dict(bins=32, histtype='step', lw=2)
+        
+        def band(ax):
+            t = hkw.copy()
+            t.update(bins=np.linspace(0,32,33), log=True)
+            ax.hist(photons.band,  **t)
+        def weight(ax):
+            ax.hist(photons.weight, **hkw)
+        def radius(ax):
+            ax.hist(photons.radius,  **hkw)
+        for f, label, ax in zip(
+                [band, weight, radius], 
+                'band weight radius'.split(),
+                axx.flatten()): 
+            ax.set_xlabel(label, fontsize=12)
+            f(ax)
+        fig1.caption=f'{self.source_name} data features'
+        #-------------------------------------------------------------------
+        self.publishme()
+
+    def cell_data(self):
+        """Cell Data
+
+        Uses `TimedData.binned_weights()` to return a `BinnedWeights` object
+        {bw_info}
+        The `BinnedWeights` contains the cell data:
+
+        {cells}
+        """
+        #--------------------------------------
+        td = self.timed_data
+        self.bw = td.binned_weights()
+        bw_info = self.monospace(self.bw)
+
+        cells = self.bw.dataframe
+        #---------------------------------------
+        self.publishme()
+
+    def light_curve_data(self):
+        """Light curve data
+
+        A "light curve" is generated from the cell data, fitting each cell to  a poisson-like function.
+        This is the contents of the `LightCurve` the poisson fitter.
+        
+        {light_curve_info}
+        {lc_df}
+
+        the columns are: 
+        * $t, tw$: time and width in JD units; 
+        * _counts_: number of photons
+        * _fext_: exposure factor, normaized to the average for a day
+        * _flux_: fit value
+        * _errors_: (lower, upper)
+        * _limit_: 95% limit
+        * _ts_: the TS value
+        * poiss_pars: the three poisson-like parameters used to detemine flux, errors, limit, ts
+
+        The `LightCurve` object has a display of the fits:
+
+        {fig1}
+        And a summary:
+        {fig2}
 
         """
         #-------------------------------------------------------------------
-        
-        if self.fileok:
-            import pickle
-            with open(self.datafile, 'rb') as inp:
-                t =pickle.load(inp)
-                self.photons = pd.DataFrame.from_dict(t['photons'])
-                self.light_curve = LightCurve(t['light_curve'])
-
+        filename = self.source_data_path + '/light_curve.pkl'
+        if os.path.isfile(filename):
+            self.light_curve = LightCurveX(filename)
         else:
-            self.gdata = Main(name=self.source_name)
-            self.photons = self.gdata.photons  
-            self.light_curve = self.gdata.light_curve()
+            self.light_curve = LightCurve(self.bw)
+            self.light_curve.write(filename)
 
-        photons_head = self.photons.head()
+        light_curve_info = self.monospace(self.light_curve)
+        lc_df = self.light_curve.dataframe
+        fig1, ax = plt.subplots(figsize=(12,4), num=1)
+        self.light_curve.flux_plot(ax =ax)
+        fig2 = self.light_curve.fit_hists(fignum=2)
+
         #-------------------------------------------------------------------
         self.publishme()
-        return ret
+
+    def get_light_curve(self, bins=None, **kwargs):
+        """ Return a LightCurve object, containing a table of fluxes and other cell info
+        bins: a list of bin edges | integer | None
+            if None use default
+        (This a a copy from Main.light_curve for convenience)
+        """
+        bw = self.timed_data.binned_weights(bins)
+        if bins is None and len(kwargs)==0: # set or use cached version unless new bins or a kwarg
+            if not hasattr(self, 'basic_lc'):
+                self.basic_lc = LightCurve(bw, **kwargs)
+            return self.basic_lc
+        return LightCurve(bw, **kwargs)
 
     def data_save(self):
-        """Save the Data
+        """Save the Data?
 
-        This makes a pickle of the photon data and light curve to `{outfile}`
+        {local_text}
 
-        Format is
-        ```
-        lc = self.light_curve
-        outdict = dict(
-            source_name=self.source_name, 
-            photons=self.gdata.photons.to_dict('records'),
-            light_curve =
-                dict(
-                    rep=lc.rep,
-                    edges = lc.data.edges,
-                    fit_dict = lc.fit_df.to_dict('records'),
-                    ),
-                )   
-        ```
-
-        Read back to check: keys are
-        {pkl_keys}
         """
         #-------------------------------------------------------------------
-        import pickle
-        outfile = f'{os.path.expandvars(self.data_path)}/{self.source_name}.pkl'
-        lc = self.light_curve
-        outdict = dict(
-                source_name=self.source_name, 
-                photons=self.gdata.photons.to_dict('records'),
-                light_curve =
-                    dict(
-                        rep=lc.rep,
-                        edges = lc.data.edges,
-                        fit_dict = lc.fit_df.to_dict('records'),
-                        ),
-                    )        
-        with open(outfile, 'wb') as out:
-            pickle.dump( outdict,  out)
-        # check
-        with open(outfile, 'rb') as inp:
-            pkl = pickle.load(inp)
-        pkl_keys = list(pkl.keys())
+
+        if not self.fileok: 
+
+            lc = self.light_curve
+            outdict = dict(
+                    source_name=self.source_name, 
+                    photons=self.gdata.photons.to_dict('records'),
+                    light_curve =
+                        dict(
+                            rep=lc.rep,
+                            edges = lc.data.edges,
+                            fit_dict = lc.fit_df.to_dict('records'),
+                            ),
+                        )        
+            with open(outfile, 'wb') as out:
+                pickle.dump( outdict,  out)
+            with open(outfile, 'rb') as inp:
+                pkl = pickle.load(inp)
+            pkl_keys = list(pkl.keys())
+            local_text = f"""
+                Saving the data, which was generated from the basic photon data set
+                ```
+                    lc = self.light_curve
+                    outdict = dict(
+                        source_name=self.source_name, 
+                        photons=self.gdata.photons.to_dict('records'),
+                        light_curve =
+                            dict(
+                                rep=lc.rep,
+                                edges = lc.data.edges,
+                                fit_dict = lc.fit_df.to_dict('records'),
+                                ),
+                            )   
+                    ```
+                    {pkl_keys}
+                """
+            
+        else:
+            local_text= f"""
+            Not saving since read in from file
+             """
+  
         #-------------------------------------------------------------------           
         self.publishme()
-        
-        
+                

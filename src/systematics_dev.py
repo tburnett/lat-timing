@@ -9,6 +9,7 @@ import pandas as pd
 __docs__=['Development']
 
 from jupydoc import DocPublisher
+from .photon_data import GammaData
 
 from utilities import phase_plot, poiss_pars_hist #, GammaData
 #from utilities import PoissonTable
@@ -19,33 +20,32 @@ class Development(DocPublisher):
     author: THB
     
     sections:
-        title_page
-        setup_summary
-        yearly_systematic
-        poisson_parameters
-        manipulate_poisson
-         
+        data_set
+    #    yearly_systematic
+    #    poisson_parameters
+    #    manipulate_poisson
+
+    source_name: Geminga 
     """
     
-    def __init__(self, gamma_data=None, source_name=None, **kwargs):
+    def __init__(self, source_name=None, **kwargs):
         super().__init__( **kwargs)
-        if not gamma_data:
-            assert source_name,'Expect source_name is set'
-            gamma_data= GammaData(name=source_name)
-        self.gdata = gamma_data
-        self.source_name = gamma_data.source_name
-        
-        # get 1-day poisson fit light curve, and save mean sigma, pull
-        self.lc = gamma_data.light_curve()
-        lcdf = self.lc.dataframe.copy()
-        
-        # make dataframe from it with Gaussian-approximation pulls
-        df= lcdf.loc[:,'t counts fexp flux'.split()]
-        df['sigma'] = lcdf.errors.apply(lambda x: 0.5*(x[0]+x[1]))
-        df['pull'] = (df.flux-1)/df.sigma
-        self.df = df
-      
-    def setup_summary(self, display=True): 
+        self.source_name = source_name or self.source_name
+  
+    def data_set(self): 
+        """Data Set
+
+        Loaded **{self.source_name}** light curve  <a href="{link}">generated here.</a>: 
+        {lc}
+        """
+        self.gdata = self.docman('GammaData.Geminga', as_client=True)
+        link = self.docman.link
+        self.gdata()
+        self.light_curve = lc = self.gdata.light_curve
+
+        self.publishme()
+
+    def setup_summary(self):
         """Setup summary
         
         Loaded gamma data:

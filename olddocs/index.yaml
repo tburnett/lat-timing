@@ -1,0 +1,20 @@
+GammaData.Geminga:
+  author: ''
+  date: 2020-06-24 12:56
+  title: Photon data setup
+dev.GammaData:
+  author: ''
+  date: 2020-06-05 17:20
+  info:
+    docname: dev.GammaData
+    filename: /nfs/farm/g/glast/u/burnett/git/lat/jupydoc_classes/dev/photon_data.py
+    source_name: Geminga
+  title: Photon timing data
+src.photon_data.GammaData:
+  author: ''
+  date: 2020-06-23 11:35
+  title: Photon data setup
+src.photon_data.GammaData.Geminga:
+  author: ''
+  date: 2020-06-24 11:01
+  title: Photon data setup

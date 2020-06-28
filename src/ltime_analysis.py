@@ -8,7 +8,7 @@ import pandas as pd
 from jupydoc import DocPublisher
 
 from lat_timing.light_curve import (PoissonRep, LightCurve, LightCurveX, LogLike, PoissonRepTable)
-from utilities import GammaData
+# from utilities import GammaData
 github_code_path ='https://github.com/tburnett/lat_timing/tree/master/code'
 
 __docs__= ['LATtiming']

@@ -11,55 +11,45 @@ __docs__=['SystematicAnalysis']
 
 
 from jupydoc import DocPublisher
-from lat_timing import Main
+# from lat_timing import Main
 
 from utilities import (phase_plot , keyword_options)
-
 
 
 class SystematicAnalysis(DocPublisher):
     """
     title: Fermi-LAT Exposure Systematics with Geminga
     author: T. Burnett <tburnett@uw.edu>
-    sections:   title_page
-                introduction
+    sections:   data_set
                 width_vs_cell_size
                 adjacent_day_correlation
                 correlation_vs_offset
                 phase_plots
                 summary
+
+    source_name: Geminga
     """
+    def __init__(self, source_name=None, **kwargs):
+        super().__init__( **kwargs)
+        self.source_name = source_name or self.source_name
+  
+    def data_set(self): 
+        """Data Set
 
-    def __init__(self, 
-                gdata=None,
-                source_name='Geminga',
-                 **kwargs,
-            ):                  
+        Loaded **{self.source_name}** light curve  <a href="{link}">generated here.</a>: 
+        {lc_df}
 
+        Added *pull* distributions.
         """
-        """
-        super().__init__(**kwargs)   
-        
-        # get the photon data, perhaps generating
-        self.gdata=gdata
-        self.source_name=source_name
-        if self.gdata is None:
-            print(f'Loading gdata with source {source_name}...')
-            self.gdata = GammaData(name=self.source_name)
-        else:
-            assert self.gdata.source_name==self.source_name, 'Source name inconsistenct'
-         
-        #create a dataframe of the light curve based on 1-day fits, and add pull info
-        self.lc = self.gdata.light_curve(1)
-
-        cells= self.lc.dataframe
-        wsum = [np.sum(c.w) for c in self.lc] # syn if weights
-        cells['wfac'] = wsum/cells.counts
-        cells['sigma'] = cells.errors.apply(lambda x: 0.5*(x[0]+x[1]))
-        cells['pull'] = (cells.flux-1)/cells.sigma
-        self.cells=cells
-
- 
+        self.gdata = self.docman('GammaData.Geminga', as_client=True)
+        link = self.docman.link
+        self.gdata()
+        self.light_curve = self.gdata.light_curve
+        self.lc_df = lc_df = self.light_curve.dataframe
+        lc_df['sigma'] = lc_df.errors.apply(lambda x: 0.5*(x[0]+x[1]))
+        lc_df['pull'] = (lc_df.flux-1)/lc_df.sigma
+    
+        self.publishme()
 
     def introduction(self):
         """Introduction   
@@ -71,7 +61,7 @@ class SystematicAnalysis(DocPublisher):
         - Dataset:  
         {self.gdata}    
         - 1-day light curve:  
-        {self.lc}
+        {self.lc_df}
         
         In what follows I examine the widths vs. interval size, and check for day-to-day correlations.
         """
@@ -93,13 +83,14 @@ class SystematicAnalysis(DocPublisher):
         The dashed line is a quadratic fit vs. $log(t)$ upto 30 days. Coefficients are {self.pfit_pars}.
   
         """
-        mean_counts = (self.cells.counts).mean()
-        effective_counts = (self.cells.poiss_pars.apply(lambda x:x[1])).mean()
+        lc = self.lc_df
+        mean_counts = (lc.counts).mean()
+        effective_counts = (lc.poiss_pars.apply(lambda x:x[1])).mean()
   
         # a list of light curves
-        self.lcx = [self.lc]
+        self.lcx = [self.light_curve]
         for i in interval_list[1:]:
-            self.lcx.append(self.gdata.light_curve(i)) 
+            self.lcx.append(self.gdata.get_light_curve(i)) 
         yy = np.array([x.mean_std() for x in self.lcx])
         std = yy[:,1]
         class PolyFit(object):
@@ -125,7 +116,7 @@ class SystematicAnalysis(DocPublisher):
         ax.xaxis.set_major_formatter(ticker.FuncFormatter(
             lambda val,pos: { 1.0:'1', 10.0:'10', 100.:'100'}.get(val,'')));
 
-        self.publishme('The width of the pull vs cell size')
+        self.publishme()
         
     def adjacent_day_correlation(self, lim=np.array([-4,4])):
         """        
@@ -138,11 +129,11 @@ class SystematicAnalysis(DocPublisher):
         correlation coefficient is {corr:.2f}!
         
         """
-        fig,ax=plt.subplots(figsize=(4,4),num=self.newfignum())
-        pull = self.cells.pull.values
-        
+        pull = self.lc_df.pull.values
         x = pull[:-1]
         y = pull[1:]
+
+        fig,ax=plt.subplots(figsize=(4,4),num=self.newfignum())
         ax.plot(x,y, '.');
         corr = np.sum(x*y)/(len(x)-1)
         ax.set(xlim=lim, ylim=lim, title='daily correlation of flux pull ', 
@@ -170,10 +161,10 @@ class SystematicAnalysis(DocPublisher):
         at 4/year, 91.3 day period.
                 
         """
-                
+        lc = self.lc_df        
         plt.rc('font', size=14) ##??
         
-        pull = self.cells.pull.values
+        pull = lc.pull.values
         r = range(1,M)
         N = len(pull)
         corr = [np.sum(pull[:N-i]*pull[i:])/(N-i) for i in r]
@@ -238,13 +229,13 @@ class SystematicAnalysis(DocPublisher):
         But, as pointed out by Matthew, this could be related to fact that I don't have azimuthal corrections to the 
         PSF. 
         """
-        df = self.lc.dataframe # get 1-day light curve, with pulls calculated
+        df = self.lc_df # get 1-day light curve dataframe, with pulls calculated
         assert 'pull' in df, 'Expected pull to be calculated'
                 
         fig1 = self.phase_plot(df,52.1)
         fig2 = self.phase_plot(df,365.25/4)
         fig3 = self.phase_plot(df,365.25)        
-        fig4 = self.lc.fit_hists(fignum=self.newfignum())
+        fig4 = self.light_curve.fit_hists(fignum=self.newfignum())
         
         sigmean_pct= df.sigma.mean() * 100
         systematic_pct = (df.pull.std()-1)*100
@@ -279,7 +270,7 @@ class SystematicAnalysis(DocPublisher):
         The yearly phase plot for {name}.
         {fig}
         """
-        df = self.lc.dataframe # get 1-day light curve, with pulls calculated
+        df = self.lc_df # get 1-day light curve, with pulls calculated
  
         fig = self.phase_plot(df, period=365.25)
         
@@ -310,7 +301,6 @@ class SystematicAnalysis(DocPublisher):
             )   
         return 
     
-
     def summary(self):
         """Summary and future plans
         
@@ -328,6 +318,4 @@ class SystematicAnalysis(DocPublisher):
         - Apply to Bayesian Block studies
         """
         self.publishme()
-        
-
-        
+    

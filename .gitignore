@@ -5,4 +5,8 @@ nohup.out
 godot
 notebooks/code development"
 code/stats
-
+docs
+figs
+images
+data
+notebooks
