@@ -6,15 +6,11 @@ import numpy as np
 import pylab as plt
 import pandas as pd
 import matplotlib.ticker as ticker
-
-__docs__=['SystematicAnalysis']
-
+from utilities import (phase_plot ,)
 
 from jupydoc import DocPublisher
-# from lat_timing import Main
 
-from utilities import (phase_plot , keyword_options)
-
+__docs__=['SystematicAnalysis']
 
 class SystematicAnalysis(DocPublisher):
     """
@@ -36,7 +32,7 @@ class SystematicAnalysis(DocPublisher):
     def data_set(self): 
         """Data Set
 
-        Loaded **{self.source_name}** photon data <a href="{link}">generated here.</a>: 
+        Loaded **{self.source_name}** photon data <a href={link}>generated here.</a>: 
         {lc_df}
 
         Added *pull* distributions.

@@ -31,6 +31,7 @@ class GammaData(DocPublisher):
 
         # source_name is the version
         self.source_name = self.version or self.source_name
+        self.doc_info['title'] += f'\nSource {self.version}'
 
     def data_summary(self):
         r"""Data reduction
@@ -48,8 +49,8 @@ class GammaData(DocPublisher):
         of 5 or 7 degrees, is used to select the data set to use here. A *weight* is assigned to each photon.
         This uses the `pointlike` model depending on the PSF, optimized with respect to the positions and 
         spectral  characterists of all sources. The weight is the probabality that an individual photon was 
-        from the source. A basic assumption for studies of the time behavior of s source is that the background
-        is **not** varying. 
+        from the source. A basic assumption for studies of the time behavior of a source is that the background
+        is **not** varying; this can be verified by fitting **both** $\alpha$ and $\beta$.
 
         3. **cells**: This is the basic partition in time, for studying time behavior. We usually
         use days for this, the MJD unit. A final input is from the effective area and exposure, to normaize counts to
@@ -69,8 +70,10 @@ class GammaData(DocPublisher):
         \end{align*}                
         Here the likelihood is a function of the relative flux parameters $\alpha$ and $\beta$, given the set
          of weights $w$. Normalization is such that the averages of $\alpha$ and $\beta$ are 1 and 0.
-        *S* and $B$ are expectations for the sums $\sum{w}$ and $\sum{(1-w)}$ for the cell relative to the averages over the full dataset. For fitting case, we fix $\beta$ to its expected zero.
-        <br><br>This likelihood function is approximated by a Poisson-like function.
+        *S* and $B$ are expectations for the sums $\sum{w}$ and $\sum{(1-w)}$ for the cell relative to the averages over the full dataset. For fiting case, we fix $\beta$ to its expected zero, 
+        and approximate the likelihood function to a simple Poisson-like function. All the 
+        likelihood parameters are then simply derived from this.
+        
 
         #### Specified source name: **{self.source_name}**
 
@@ -153,10 +156,11 @@ class GammaData(DocPublisher):
         self.publishme()
 
     def light_curve_data(self):
-        """Light curve data
+        """The 1-day Light Curve 
 
-        A "light curve" is generated from the cell data, fitting each cell to  a poisson-like function.
-        This is the contents of the `LightCurve` with the poisson fitter.
+        A "light curve" is derived  from the cell data, after fitting each cell to the a poisson-like function.
+        This is the contents of the `LightCurve` object with the poisson fitter. (This section caches the
+        result of the fit in the file <samp>{filename}</samp>.)
         
         {light_curve_info}
         {lc_df}
