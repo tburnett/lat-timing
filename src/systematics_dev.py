@@ -11,8 +11,7 @@ __docs__=['Development']
 from jupydoc import DocPublisher
 from .photon_data import GammaData
 
-from utilities import phase_plot, poiss_pars_hist #, GammaData
-#from utilities import PoissonTable
+from utilities import (phase_plot, poiss_pars_hist, PoissonTable)
    
 class Development(DocPublisher): 
     """
@@ -21,9 +20,9 @@ class Development(DocPublisher):
     
     sections:
         data_set
-    #    yearly_systematic
-    #    poisson_parameters
-    #    manipulate_poisson
+        yearly_systematic
+        poisson_parameters
+        manipulate_poisson
 
     source_name: Geminga 
     """
@@ -35,13 +34,16 @@ class Development(DocPublisher):
     def data_set(self): 
         """Data Set
 
-        Loaded **{self.source_name}** light curve  <a href="{link}">generated here.</a>: 
-        {lc}
+        Loaded **{self.source_name}** light curve  <a href={link}>generated here.</a>: 
+        {lc_df}
         """
-        self.gdata = self.docman('GammaData.Geminga', as_client=True)
-        link = self.docman.link
-        self.gdata()
+        self.gdata, link= self.docman.client('GammaData.Geminga')
+        
         self.light_curve = lc = self.gdata.light_curve
+        self.lc_df = lc_df = self.light_curve.dataframe
+
+        lc_df['sigma'] = lc_df.errors.apply(lambda x: 0.5*(x[0]+x[1]))
+        lc_df['pull'] = (lc_df.flux-1)/lc_df.sigma
 
         self.publishme()
 
@@ -58,7 +60,7 @@ class Development(DocPublisher):
 
         """        
         gdata_summary = self.monospace(self.gdata)
-        dfhead = self.df.head(1)
+        dfhead = self.lc_df.head(1)
         #---------------------------
         self.publishme()
         
@@ -81,7 +83,7 @@ class Development(DocPublisher):
         
         """
         #-----------------------------------------------------
-        df = self.df # get 1-day light curve, with pulls calculated
+        df = self.lc_df # get 1-day light curve, with pulls calculated
         pull_std = df.pull.std()
         
         figa= phase_plot(df, period=period)
@@ -116,14 +118,14 @@ class Development(DocPublisher):
             # adjust the pull
             return  df.pull.values - corr    
         
-        adjusted_pull = pull_adjustment(self.df, fix)
+        adjusted_pull = pull_adjustment(self.lc_df, fix)
           
         adjusted_pull_std = adjusted_pull.std()
         
         def pulls_hist():
             fig, ax = plt.subplots(figsize=(6,3), num=self.newfignum())
             hkw = dict(bins = np.linspace(-5,5, 51),histtype='step', lw=2, log=True,)
-            for x, name in zip([self.df.pull, adjusted_pull], 'raw adjusted'.split()):
+            for x, name in zip([self.lc_df.pull, adjusted_pull], 'raw adjusted'.split()):
                 ax.hist(x, label=f'{name:8s} {x.std():.2f}', **hkw )
             ax.set(xlabel='normalized deviation, or pull',ylim=(0.5,None))
             leg=ax.legend(prop=dict(family='monospace')); 
