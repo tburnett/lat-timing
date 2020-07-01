@@ -405,9 +405,9 @@ class TimedData(object):
             edges=self.edges,
             binned_exposure=self.binned_exposure,
             interval = self.interval,
-            )        
+            )     
         with open(filename, 'wb') as out:
-            pickle.dump(dd, out)
+            pickle.dump(dd, out)   
 
     def _exposure(self, livetime, pcosine):
         """return exposure calculated for each pair in livetime and cosines arrays
@@ -584,8 +584,8 @@ class TimedData(object):
 #                 B= exp*self.B,               
 #                 )
 
-#     def __len__(self):
-#         return self.N
+    def __len__(self):
+        return self.N
 
     def test_plots(self):
         """Make a set of plots of exposure, counts, properties of weights

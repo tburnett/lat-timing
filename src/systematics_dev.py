@@ -11,7 +11,7 @@ __docs__=['Development']
 from jupydoc import DocPublisher
 from .photon_data import GammaData
 
-from utilities import (phase_plot, poiss_pars_hist, PoissonTable)
+from utilities import (phase_plot, poiss_pars_hist) #, PoissonTable)
    
 class Development(DocPublisher): 
     """
