@@ -7,59 +7,46 @@ import pandas as pd
 
 from jupydoc import DocPublisher
 
-from lat_timing.light_curve import (PoissonRep, LightCurve, LightCurveX, LogLike, PoissonRepTable)
-# from utilities import GammaData
+from lat_timing.light_curve import (PoissonRep, GaussianRep, Gaussian2dRep, LogLike)#, PoissonRepTable)
+
 github_code_path ='https://github.com/tburnett/lat_timing/tree/master/code'
 
-__docs__= ['LATtiming']
+__docs__= ['LikelihoodReps']
 
-class LATtiming(DocPublisher):
+class LikelihoodReps(DocPublisher):
     """
-    title: |
-        LAT timing code
-        Likelihood
+    title: Likelihood Representations
         
     author: Toby Burnett        
     sections:
-        title_page likelihood_definition        
+        data_set 
+        likelihood_reps 
+
+    source_name: Geminga    
     """
     #introduction likelihood_reps 
-    def __init__(self,source_name='Geminga', **kwargs):
+    def __init__(self,source_name=None, **kwargs):
         super().__init__(**kwargs)
-        self.gdata= GammaData(name=source_name)
-        print('Loaded gamma data')
-           
-    def likelihood_definition(self, n=0, quiet=True):
-        r"""Likelihood definition
-        
-        Here, from the Kerr derivation, is an approximation to the likelihood for
-        a single cell, 
-        \begin{align}
-        \log\mathcal{L}(\alpha,\beta) =&\sum_{w} \log \bigg(1 + \alpha w + \beta\ (1-w)\bigg)
-        - \alpha S - \beta B
-        \end{align}
-        
-        where $w$ is a set of weights for the photons, $\alpha$ and $\beta$ are parameters
-        representing the size of signal and background relative to their average, and
-        $A$ and $B$ are estimates for the expected $\sum{w}$ and $\sum{(1-w)}$ from the 
-        ensemble average. 
+        self.source_name = source_name or self.source_name
+
+    def data_set(self): 
+        """Data Set
+
+        Loaded **{self.source_name}** photon data <a href={link}>generated here.</a>: 
+        {lc_df}
+
+        Added *pull* distributions.
         """
+        
+        self.gdata, link = self.docman.client('GammaData.Geminga')
+        self.light_curve = self.gdata.light_curve
+        self.lc_df = lc_df = self.light_curve.dataframe
+        lc_df['sigma'] = lc_df.errors.apply(lambda x: 0.5*(x[0]+x[1]))
+        lc_df['pull'] = (lc_df.flux-1)/lc_df.sigma
+    
         self.publishme()
     
-    def test_data():
-        """Test Data
-        
-        Loaded input data:  {gdata_str}
-        Generate binned weights with `TimedData.binned_weights()`
-
-        """
-        gdata_str = self.monospace(str(self.gdata))
-        t =self.gdata.cells.to_dict('records')
-        bw = self.gdata.timedata.binned_weights()
-        self.cells=bw
-        self.cell =self.cells[n]
-        self.publishme()
-        
+       
     def likelihood_reps(self):
         """Likelihood Representations
         
@@ -69,19 +56,24 @@ class LATtiming(DocPublisher):
         The cell data: {ll.str}   
         
         * **Raw**
-        The `LogLike` object implements the precise evaluation of the likelihood.         
+        The `LogLike` object implements the precise evaluation of the likelihood. 
+                
         
         * **Gaussian**
-        The `LogLike` object also performs a least-squares fit to itself. The parameters define the Gaussin 
-        representation.
+        The `LogLike` object also performs a least-squares fit to itself. 
+        The parameters define the Gaussian representation.
         Here is a plot of the least-squares result, compared with the likelihood function.
         {fig1}<br>       
         This shows the likelihood curve, and the fit result, with an error correspondong to the curvature.
         The point with an error bar is plotted at the -0.5 likelihood, where the upper and lower errors
         should be.
+
+        {grep}
         
         * **Gaussian2D**
           The (source, backgrond) fit parameters.
+          
+          {g2rep}
           
         * **Poisson**
         The LogLike object is a likelihood function. But it is a bit time consuming, involving sums over the 
@@ -102,10 +94,16 @@ class LATtiming(DocPublisher):
         log-likelihoods, following the overhead to create the table.
   
         """
-        ll=LogLike(self.cell)
+        self.cell = self.gdata.cells.iloc[0]
+        ll = LogLike(self.cell)
         counts = ll.n
         ll.str=self.monospace(repr(ll))
         fit_info=self.monospace(str(ll.fit_info()))
+
+        grep = GaussianRep(ll).fit
+        g2rep= Gaussian2dRep(ll).fit
+        prep = PoissonRep(ll).fit
+
         def gaussian_fit():
             fig, ax = plt.subplots(figsize=(4,2))
             ll.plot(ax=ax)

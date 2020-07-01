@@ -197,6 +197,11 @@ class GammaData(DocPublisher):
         cells = self.bw.dataframe
         #---------------------------------------
         self.publishme()
+        
+    @property
+    def cells(self):
+        return self.timed_data.binned_weights().dataframe
+
 
     def light_curve_data(self):
         """The 1-day Light Curve 
