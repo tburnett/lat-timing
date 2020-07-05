@@ -46,6 +46,7 @@ class GammaData(DocPublisher):
         Thus there are 32 such bands from 100 MeV to 1 TeV.
         All 100M photons were extracted from the FT1 files and put into a database, with each
         photon characterized by its time and integers specifying the band and position.
+
         3. **Cone selection**: For the study of a single source, a cone about its position to a radius 
         of 5 or 7 degrees, is used to select the data set to use here. A *weight* is assigned to each photon.
         This uses the `pointlike` model depending on the PSF, optimized with respect to the positions and 
@@ -78,8 +79,6 @@ class GammaData(DocPublisher):
 
         #### Specified source name: **{self.source_name}**
 
-        {text}
-        
         Contents of the folder with source data `{self.source_data_path}`
       
         {contents}
@@ -101,9 +100,9 @@ class GammaData(DocPublisher):
   
         if os.path.isfile(filename):
             self.timed_data = TimedDataX(filename)
-            self.already_generated(filename)
+            return self.already_generated(filename)
         else:
-            self.generate(filename)
+            return self.generate(filename)
 
     def already_generated(self, filename):
         """Read in cone-selected data
@@ -114,7 +113,7 @@ class GammaData(DocPublisher):
         #-------------------------------------------------------------------
         self.publishme()
 
-    def generate(self, filenae):
+    def generate(self, filename):
         """Generate cone-selected data set
 
         Run `Main` to make cone selection from full database:
@@ -128,26 +127,21 @@ class GammaData(DocPublisher):
         
         """
         from lat_timing import Main
-        from contextlib import redirect_stdout
-        import io
-        rout = io.StringIO()
-        with redirect_stdout(rout):
+        with self.capture_print() as text:
             tdata = Main( 
                  name=self.source_name, 
                  weight_file=\
                  '/nfs/farm/g/glast/g/catalog/pointlike/skymodels/P8_10years/uw9011/weight_files',
                  )
-            
-        text = self.monospace(rout.getvalue())
+
         ok = tdata is not None
         if ok:
             self.timed_data = tdata.timedata
             tdata.timedata.write(filename)
-            print(f'****writing to {filename}')
             contents = self.shell(f'ls -l {self.source_data_path}')
 
         self.publishme()
-        return None if ok else 'Failure to read data'
+        return None if ok else 'Failure to reed data'
 
     def photon_data(self):
         """Photon data
@@ -185,7 +179,7 @@ class GammaData(DocPublisher):
 
         Uses `TimedData.binned_weights()` to return a `BinnedWeights` object
         {bw_info}
-        The `BinnedWeights` contains the cell data:
+        The `BinnedWeights` contains the cell data for default time bins:
 
         {cells}
         """
@@ -194,15 +188,10 @@ class GammaData(DocPublisher):
         self.bw = td.binned_weights()
         bw_info = self.monospace(self.bw)
 
-        cells = self.bw.dataframe
+        self.cells = cells =  self.bw.dataframe
         #---------------------------------------
         self.publishme()
-        
-    @property
-    def cells(self):
-        return self.timed_data.binned_weights().dataframe
-
-
+    
     def light_curve_data(self):
         """The 1-day Light Curve 
 
