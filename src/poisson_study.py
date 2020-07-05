@@ -41,6 +41,7 @@ class PoissonDoc(DocPublisher):
         second  peaking at 50. Both have backgrounds of 1.0.
         {fig}
 
+
         """
         fig, (ax1,ax2) = plt.subplots(1,2, figsize=(6,3)) 
         pf = PoissonFitter((Poisson([-1, 1., 5.])))

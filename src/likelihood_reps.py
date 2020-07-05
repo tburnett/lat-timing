@@ -7,7 +7,7 @@ import pandas as pd
 
 from jupydoc import DocPublisher
 
-from lat_timing.light_curve import (PoissonRep, GaussianRep, Gaussian2dRep, LogLike)#, PoissonRepTable)
+from lat_timing.light_curve import (PoissonRep, GaussianRep, Gaussian2dRep, LogLike, PoissonRepTable)
 
 github_code_path ='https://github.com/tburnett/lat_timing/tree/master/code'
 
@@ -48,7 +48,7 @@ class LikelihoodReps(DocPublisher):
     
        
     def likelihood_reps(self):
-        """Likelihood Representations
+        r"""Likelihood Representations
         
         Get a `LogLike` object with the selected cell.
         Explore how to represent the function, as defined by Kerr.
@@ -73,15 +73,17 @@ class LikelihoodReps(DocPublisher):
         * **Gaussian2D**
           The (source, backgrond) fit parameters.
           
-          {g2rep}
-          
+          {g2flux}
+
+          {g2beta}
+
         * **Poisson**
         The LogLike object is a likelihood function. But it is a bit time consuming, involving sums over the 
         weights, {counts} in this case. On the other hand, a Gaussian constructed from the least-squares fit
         is, for high statistics as this case, is a very good approximation.
         <br>I have found that a Poisson-like function works quite well in all cases, and I use it extensively.
         The code, in [poisson.py]({github_code_path}/poisson.py), is invoked by `PoissonRep`. It
-        is much faster, 5.45 µs vs. 77.4 µs in this case, and requires only three parameters vs the entire
+        is much faster, 5.45 µs vs. 77.4 µs in this case, and requires only three parameters vs the full
         array of weights.
         <br>Fit results: {prep}
         <br> Comparison plot.
@@ -102,6 +104,10 @@ class LikelihoodReps(DocPublisher):
 
         grep = GaussianRep(ll).fit
         g2rep= Gaussian2dRep(ll).fit
+        g2flux  = rf"$\alpha = {g2rep['flux']:.2f} \pm {g2rep['sig_flux']:.2f}$"
+        g2beta  = rf"$\beta = {g2rep['beta']:.2f} \pm {g2rep['sig_beta']:.2f}$"
+     
+        
         prep = PoissonRep(ll).fit
 
         def gaussian_fit():
@@ -114,8 +120,10 @@ class LikelihoodReps(DocPublisher):
         prep = PoissonRep(ll)
         def poisson_fit():
             fig, ax = plt.subplots(figsize=(6,3))
-            prep.comparison_plots(ax=ax)
+            prep.comparison_plots(ax=ax, xlim=(0.6, 1.4))
             return fig
         fig2 = poisson_fit()
+
+        self.ptbl = PoissonRepTable(ll)
         
         self.publishme()

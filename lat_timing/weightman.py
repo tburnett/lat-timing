@@ -6,7 +6,9 @@ Manage weights
 import os, pickle
 import healpy
 import numpy as np
+import pandas as pd
 from . binner import BinnedWeights
+
 
 
 class WeightedData(object):
@@ -150,7 +152,7 @@ class WeightedDataX(WeightedData):
        as saved in edges and exposure.
     """
     def __init__(self, filename):
-        import pandas as pd
+
         try:
             with open(filename, 'rb') as inp:
                 dd = pickle.load(inp)
@@ -277,3 +279,86 @@ class WeightModel(object):
             s.plot(data)            
         return s
     
+
+class GetWeightedData(object):
+
+    skymodel =   'P8_10years/uw9011'
+    model_path = '/nfs/farm/g/glast/g/catalog/pointlike/skymodels/'+skymodel
+    server =     'rhel6-64.slac.stanford.edu'
+    username =   'burnett'
+
+    def __init__(self, source_name, skymodel=skymodel):
+
+        import pysftp as sftp
+        from IPython.display import Image
+        
+        print(f'Processing model {skymodel}: retreiving data from {self.server}')
+        
+        srv = sftp.Connection(self.server, self.username)
+        srv.chdir(self.model_path)
+        
+        listdir = srv.listdir()
+        for needed in ['weight_files', 'sedfig']:
+            if not needed in listdir:
+                print( f'Did not find "{needed}" in "{self.model_path}"',file=sys.stderr)
+                return
+            
+        # copy the source table
+        f = list(filter( lambda n: n.startswith('sources_uw') , listdir))
+        srv.get(f[0], '/tmp/sources.csv')
+                
+        # check for the weight file
+        t = srv.listdir('weight_files')
+        f=''
+        for x in t:
+            if x.startswith(source_name):
+                f = x
+        if not f:
+            print('Did not find a weight file: need to run ...', file=sys.stderr)
+            srv.close(); return
+        
+        tmpwf = '/tmp/'+f
+        
+        # copy the weight file
+        srv.get('weight_files/'+f, tmpwf)
+        with open(tmpwf, 'rb') as inp:
+            p = pickle.load(inp,  encoding='latin1')
+        key_list = 'radius  weights source_name'.split()
+        for key in key_list:
+            if key not in p.keys():
+                print(f'Did not find key {key} in {list(p.keys())}')
+                srv.close(); return
+            
+        # get the SED, using the actual name
+        model_source_name = p['source_name']
+        fname = model_source_name.replace(' ', '_').replace('+', 'p')
+        t = srv.listdir('sedfig')
+        f = ''
+        for x in t:
+            if x.startswith(fname):
+                f = x
+        if not f:
+            print(f'Did not find SED file {fname}*', file=sys.stderr)
+            srv.close(); return    
+        
+        print(f'found SED: {f}')
+        tmpf = '/tmp/'+f
+        srv.get('sedfig/'+f, tmpf)
+        self.sed_image_file = tmpf
+
+        # check the source info table for the source
+        df = pd.read_csv('/tmp/sources.csv', index_col=0)
+        self.src_info = df.loc[model_source_name]
+        
+        # finally, add the SED to the pickle
+        p['sed'] = self.sed_image = Image(tmpf)
+        p['model_source_name']=model_source_name
+        p['src_info']=self.src_info
+        with open(tmpwf, 'wb') as out:
+            pickle.dump(p, out)
+            
+
+
+
+        srv.close()
+                

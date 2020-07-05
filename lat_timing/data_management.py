@@ -195,7 +195,6 @@ class TimedData(object):
         test_elements = 'energy_bins pixels weights nside model_name radius order roi_name'.split()
         assert np.all([x in wtd.keys() for x in test_elements]),f'Dict missing one of the keys {test_elements}'
 
-
         pos = wtd['source_lb']
         if self.verbose>0:
             print(f'Adding weights from file {os.path.realpath(filename)}')

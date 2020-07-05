@@ -8,7 +8,7 @@ import matplotlib.pylab as plt
 import pandas as pd
 
 from jupydoc import DocPublisher
-from lat_timing import (TimedDataX, LightCurve, LightCurveX)
+from lat_timing import (TimedDataX, LightCurve, LightCurveX, GetWeightedData)
 # from lat_timing import (Main, LightCurve, WeightedDataX, BinnedWeights)
 
 __docs__ = ['GammaData']
@@ -19,7 +19,7 @@ class GammaData(DocPublisher):
     title: Photon data setup
    
     sections:
-         data_summary [read_data photon_data cell_data light_curve_data ] 
+         data_summary [read_data get_weights photon_data cell_data light_curve_data ] 
 
     source_name: Geminga
     data_path: $HOME/work/lat/data/photons
@@ -104,6 +104,31 @@ class GammaData(DocPublisher):
         else:
             return self.generate(filename)
 
+    def get_weights(self):
+        """Weights
+
+        This subsection summarizes data retrieved from the server {}
+
+        Output from its retrieval of data for the skymodel {wd.skymodel} from the server {wd.server}:
+        {text}
+
+        This SED shows the spectral model used to determine the weights.
+
+        {sed_image}
+
+        And here is its fit summary.
+
+        {src_info}
+        """
+        with self.capture_print() as text:
+            self.wd = wd = GetWeightedData(self.source_name)
+
+        sed_image = self.image(wd.sed_image_file, width=200, caption=f'SED for {self.source_name}')    
+        src_info = self.monospace(wd.src_info, 'source fit information')
+
+        
+        self.publishme()
+        
     def already_generated(self, filename):
         """Read in cone-selected data
 

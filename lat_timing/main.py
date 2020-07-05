@@ -13,7 +13,8 @@ from astropy.coordinates import SkyCoord
 from utilities import keyword_options
 
 from . weightman import WeightedData, WeightModel
-from . light_curve import LightCurve, BayesianBlocks
+from . light_curve import LightCurve
+from . bayesian import BayesianBlocks
 
 
 
