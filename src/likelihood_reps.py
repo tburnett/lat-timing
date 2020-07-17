@@ -71,7 +71,7 @@ class LikelihoodReps(DocPublisher):
         {grep}
         
         * **Gaussian2D**
-          The (source, backgrond) fit parameters.
+          The (source, background) fit parameters.
           
           {g2flux}
 
@@ -80,7 +80,8 @@ class LikelihoodReps(DocPublisher):
         * **Poisson**
         The LogLike object is a likelihood function. But it is a bit time consuming, involving sums over the 
         weights, {counts} in this case. On the other hand, a Gaussian constructed from the least-squares fit
-        is, for high statistics as this case, is a very good approximation.
+        is, for high statistics as this case, is a very good approximation. The function is 
+        <a href={poisson_link}> described here.</a>
         <br>I have found that a Poisson-like function works quite well in all cases, and I use it extensively.
         The code, in [poisson.py]({github_code_path}/poisson.py), is invoked by `PoissonRep`. It
         is much faster, 5.45 µs vs. 77.4 µs in this case, and requires only three parameters vs the full
@@ -107,7 +108,8 @@ class LikelihoodReps(DocPublisher):
         g2flux  = rf"$\alpha = {g2rep['flux']:.2f} \pm {g2rep['sig_flux']:.2f}$"
         g2beta  = rf"$\beta = {g2rep['beta']:.2f} \pm {g2rep['sig_beta']:.2f}$"
      
-        
+        _, poisson_link = self.docman.client('PoissonDoc')
+
         prep = PoissonRep(ll).fit
 
         def gaussian_fit():
