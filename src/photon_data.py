@@ -249,16 +249,17 @@ class GammaData(DocPublisher):
         {light_curve_info}
         {lc_df}
 
-        the columns are: 
-        * $t, tw$: time and width in JD units; 
-        * _counts_: number of photons
-        * _fext_: exposure factor, normaized to the average for a day
-        * _flux_: fit value
-        * _errors_: (lower, upper)
-        * _limit_: 95% limit
-        * _ts_: the TS value
-        * poiss_pars: the three poisson-like parameters used to detemine flux, errors, limit, ts
-
+        the columns are:         
+        <ul>
+        <li>$t, tw$: time and width in JD units; 
+        <li>_counts_: number of photons
+        <li>_fext_: exposure factor, normaized to the average for a day
+        <li>_flux_: fit value
+        <li>_errors_: (lower, upper)
+        <li>_limit_: 95% limit
+        <li>_ts_: the TS value
+        <li>poiss_pars: the three poisson-like parameters used to detemine flux, errors, limit, ts
+        </ul>
         The `LightCurve` object has a display of the fits:
 
         {fig1}
@@ -350,12 +351,9 @@ class GammaData(DocPublisher):
 
 class DataDescription(DocPublisher): 
     """
-    #title: Photon Data Description
+    title: Photon Data Description
    
     """            
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
     def title_page(self): 
         r"""<h2> Photon Data Description </h2>
     

@@ -2,5 +2,5 @@
 """
 
 # default where documents will be saved, relative to here if not absolute
-docspath = '../docs'
+docspath = '../../docs'
 
