@@ -24,11 +24,11 @@ class GammaData(DocPublisher):
     default_source_name: ''
     data_path: $HOME/work/lat-data/sources
 
-    # Remote information
+    # Remote (SLAC) information
     server:     rhel6-64.slac.stanford.edu
     username:   burnett
-    remote_data_path: /nfs/farm/g/glast/u/burnett/work/lat/data/photons
-    generation_path: /nfs/farm/g/glast/g/catalog/pointlike/skymodels
+    remote_data_path: /nfs/farm/g/glast/u/burnett/work/lat-data/data/sources
+    weight_path: /nfs/farm/g/glast/g/catalog/pointlike/skymodels/P8_10years/uw9011/weight_files
 
 
     """
@@ -101,9 +101,9 @@ class GammaData(DocPublisher):
                             srv.get(file, dest+'/'+file)
                     else:
                         text += 'Not found on remote.'
-                return text
+                return False, text
             except Exception as e:
-                print(text+ f'\n*** Failed attempt to get remote files: {e}', file=sys.stderr)
+                print(text+ f'\n*** Failed attempt to get remote files: {e.__repr__()}', file=sys.stderr)
                 return False, text
                 
 
