@@ -12,8 +12,10 @@ from utilities import keyword_options
 class EffectiveArea(object):
 
     defaults = (
-        ('irf','P8R3_SOURCE_V2','IRF to use'),
-        ('CALDB',None,'path to override environment variable'),
+        ('irf',       'P8R2_SOURCE_V6', #'P8R3_SOURCE_V2',
+                            'IRF to use'),
+        ('file_path', None, 'folder to find the AEFF file'),
+        ('CALDB',     None,'path to override environment variable'),
         ('use_phidep',False,'use azmithual dependence for effective area'),
         )
 
@@ -22,12 +24,16 @@ class EffectiveArea(object):
         keyword_options.process(self,kwargs)
         #ct0_file,ct1_file = get_irf_file(self.irf,CALDB=self.CALDB)
         if self.CALDB is None:
-            self.CALDB=os.environ['CALDB']
+            self.CALDB=os.environ.get('CALDB',None)
+        assert  (self.file_path or self.CALDB), 'No path given for effective area'
  
-        ##cdbm = pycaldb.CALDBManager(self.irf)
-        if os.path.exists(f'{self.CALDB}/data' ):
-            self.CALDB+='/data'
-        aeff_file = f'{self.CALDB}/glast/lat/bcf/ea/aeff_{self.irf}_FB.fits'
+        if not self.file_path:
+            if os.path.exists(f'{self.CALDB}/data' ):
+                self.CALDB+='/data'
+            self.file_path =  f'{self.CALDB}/glast/lat/bcf/ea'
+        
+        aeff_file = os.path.expandvars(f'{self.file_path}/aeff_{self.irf}_FB.fits')
+
         assert os.path.exists(aeff_file), f'Effective area file {aeff_file} not found'
         ct0_file = ct1_file = aeff_file ##cdbm.get_aeff()
         self._read_aeff(ct0_file,ct1_file)

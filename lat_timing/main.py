@@ -33,7 +33,9 @@ class Main(object):
         ('weight_model', None, 'file name for a weight model'),
         ('fix_weights',  True, 'Set to supplement weights with model' ),
         ('version',     2.0,   'version number: >1 is new data storage'),
-        ('data_selection', {}, 'set dats selection: '),
+        ('data_selection', {}, 'set data selection: '),
+        ('parquet_root',   '$HOME/work/lat-data', # '/nfs/farm/g/glast/u/burnett/analysis/lat_timing/data/', 
+                           'where to find parquet data'),
        )
     
     @keyword_options.decorate(defaults)
@@ -82,6 +84,7 @@ class Main(object):
     def _load_data(self):
         try:
             from . data_management import TimedData, TimedDataArrow
+            
         except: 
             print('Cannot use Main to load data')
             return None
@@ -89,9 +92,10 @@ class Main(object):
         if self.version>1:
 
             return TimedDataArrow(self, source_name=self.name, verbose=self.verbose,
+                parquet_root=os.path.expandvars(self.parquet_root),
                  **self.data_selection)
 
-            return TimedData(self, source_name=self.name, verbose=self.verbose)
+        return TimedData(self, source_name=self.name, verbose=self.verbose)
 
     def __str__(self):
         return str(self.timedata)
@@ -124,7 +128,7 @@ class Main(object):
         else:
             self.l,self.b = position
         if self.verbose>0:
-            print(f'\nSource "{self.name}" at: (l,b)=({self.l:.3f},{self.b:.3f}')
+            print(f'\nSource "{self.name}" at: (l,b)=({self.l:.3f},{self.b:.3f})')
             
     def light_curve(self, bins=None, **kwargs):
         """ Rerurn a LightCurve object, containing a table of fluxes and other cell info

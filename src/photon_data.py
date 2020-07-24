@@ -11,7 +11,7 @@ from jupydoc import Publisher, DocPublisher
 from lat_timing import (TimedDataX, LightCurve, LightCurveX, GetWeightedData)
 # from lat_timing import (Main, LightCurve, WeightedDataX, BinnedWeights)
 
-__docs__ = ['GammaData', 'DataDescription']
+__docs__ = ['GammaData', 'DataDescription', 'DataFiles']
 
    
 class GammaData(DocPublisher): 
@@ -41,6 +41,7 @@ class GammaData(DocPublisher):
         self.doc_info['title'] += f'\nSource {self.version}'
 
         self.home = os.environ.get('HOME', '')
+        self.wsl = self.home.startswith('/home')
         self.data_path = os.path.expandvars(self.data_path)
 
     def data_summary(self):
@@ -51,19 +52,15 @@ class GammaData(DocPublisher):
         #### Specified source name: **{self.source_name}**
 
         {text}
-        Contents of the folder with source data `{self.source_data_path}`
-      
-        {contents}
         
         """
 
         #-------------------------------------------------------------------
         # check for data
         ok, text = self.check_data()
-        if not ok: return text
-        
+                
         otherdoc, link = self.docman.client('DataDescription')
-        contents = self.shell(f'ls -l {self.source_data_path}',)
+       
         self.publishme()
         
 
@@ -82,40 +79,47 @@ class GammaData(DocPublisher):
         self.source_data_path = f'{os.path.expandvars(self.data_path)}/{self.source_name}'
         if not os.path.isdir(self.source_data_path):
             # not in the local. Check remote
-            text+='not found locally -- checking remote...'
+            text+='not found locally -- checking for remote weight file...'
+
+        t = self.get_weight_data()
+        if t:
+            os.makedirs(self.source_data_path, exist_ok=True)
+            text += f'Weight file copied to '+t 
+            return True, text
+        return False, 'Failed to find it--please run get_weights'
             
-            try:
-                with sftp.Connection(self.server, self.username) as srv:
-                    srv.chdir(self.remote_data_path)
-                    flist =srv.listdir()
-                    if self.source_name in flist:
-                        text += f'\nFound on remote, copying...:'
-                        dest = os.path.join(self.data_path, self.source_name)
-        #                text += f' to {dest}'
-                        if not os.path.isdir(dest):
-                            os.makedirs(dest, exist_ok=True)
-                        srv.chdir(self.source_name)
-                        tocopy = srv.listdir()
-                        for file in tocopy:
-                            text += f'{file}, '
-                            srv.get(file, dest+'/'+file)
-                    else:
-                        text += 'Not found on remote.'
-                return False, text
-            except Exception as e:
-                print(text+ f'\n*** Failed attempt to get remote files: {e.__repr__()}', file=sys.stderr)
-                return False, text
+        #     try:
+        #         with sftp.Connection(self.server, self.username) as srv:
+        #             srv.chdir(self.remote_data_path)
+        #             flist =srv.listdir()
+        #             if self.source_name in flist:
+        #                 text += f'\nFound on remote, copying...:'
+        #                 dest = os.path.join(self.data_path, self.source_name)
+        # #                text += f' to {dest}'
+        #                 if not os.path.isdir(dest):
+        #                     os.makedirs(dest, exist_ok=True)
+        #                 srv.chdir(self.source_name)
+        #                 tocopy = srv.listdir()
+        #                 for file in tocopy:
+        #                     text += f'{file}, '
+        #                     srv.get(file, dest+'/'+file)
+        #             else:
+        #                 text += 'Not found on remote.'
+        #         return False, text
+        #     except Exception as e:
+        #         print(text+ f'\n*** Failed attempt to get remote files: {e.__repr__()}', file=sys.stderr)
+        #         return False, text
                 
 
-            if not os.path.isdir(self.generation_path):
-                text += f'\n*** No photon data for source "{self.source_name}" -- cannot generate on this machine.\n'
-                text += f'Sources available here:\n'
-                text += self.shell(f'ls {self.data_path}', monospace=False)
-                #print(text, file = sys.stderr)
-                return False, text
-        else:
-            text += f'data  ok.'
-        return True, text
+        #     if not os.path.isdir(self.generation_path):
+        #         text += f'\n*** No photon data for source "{self.source_name}" -- cannot generate on this machine.\n'
+        #         text += f'Sources available here:\n'
+        #         text += self.shell(f'ls {self.data_path}', monospace=False)
+        #         #print(text, file = sys.stderr)
+        #         return False, text
+        # else:
+        #     text += f'data  ok.'
+        # return True, text
 
     def read_data(self):
         filename = self.source_data_path+'/time_data.pkl'
@@ -124,13 +128,36 @@ class GammaData(DocPublisher):
             self.timed_data = TimedDataX(filename)
             return self.already_generated(filename)
         else:
-
+            os.makedirs(self.source_data_path, exist_ok=True)
             return self.generate(filename)
 
+    def get_weight_data(self):
+        fn = self.source_name.replace(' ','_').replace('+','p')+'_weights.pkl'
+        if self.wsl:
+            path = '/tmp/weight_files'
+            # on a  local WSL machine
+            import pysftp as sftp
+            with sftp.Connection(self.server, self.username) as srv:
+                srv.chdir(self.weight_path)
+                files = srv.listdir()
+                if fn not in files:
+                    print(f'Did not find {fn} in {self.weight_path}')
+                    return None
+                os.makedirs(path, exist_ok=True)
+                srv.get(fn, path+'/'+fn)
+
+            return path
+        else:
+            # at SLAC
+            files = glob.glob(self.weight_path)
+            if fn not in files:
+                    return None
+            return self.weight_path
+ 
     def get_weights(self):
         """Weights
 
-        This subsection summarizes data retrieved from tehe server {wd.server} for the pointlie skymodel {wd.skymodel}.
+        This subsection summarizes data retrieved from the server {wd.server} for the pointlie skymodel {wd.skymodel}.
 
         {text}
 
@@ -176,10 +203,10 @@ class GammaData(DocPublisher):
         from lat_timing import Main
         with self.capture_print() as text:
             tdata = Main( 
-                 name=self.source_name, 
-                 weight_file=\
-                 '/nfs/farm/g/glast/g/catalog/pointlike/skymodels/P8_10years/uw9011/weight_files',
-                 )
+                name=self.source_name, 
+                weight_file=self.get_weight_data() ,
+                parquet_root='$HOME/work/lat-data',
+                )
 
         ok = tdata is not None
         if ok:
@@ -402,3 +429,148 @@ class DataDescription(DocPublisher):
         #-------------------------------------------------------------------
         # check for data
         self.publishme()
+
+class DataFiles(DocPublisher):
+    """
+    title: Data Input Files 
+
+    sections: basic_files source_selection example
+
+    root: $HOME/work/lat-data
+    ft2: ft2/*.fits
+    gti: binned/*.fits
+    effective_area: aeff
+
+    verbose: 3
+    example_source: Geminga
+
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+        root = os.path.expandvars(self.root)
+        assert os.path.isdir(root)
+        self.data_file_pattern=os.path.join(root, self.gti)
+        self.ft2_file_pattern=os.path.join(root, self.ft2)
+        self.gti_file_pattern=os.path.join(root, self.gti)
+        self.effective_area_path = os.path.join(root, self.effective_area)
+        
+        
+
+    def basic_files(self):
+        """Basic Data Files
+
+        The various files used to construct the final product, a light curve for a given source,
+        are located under a single root:
+        {self.root}, which evaluates to {root} on this machine. Contents are:
+
+        {ls_root}
+
+        Running `{du_command}` shows the sizes: {du_result}
+
+        The components are:
+
+        * `photon_dataset`: The monthly files in HDF5 format containing each photon's time, position, 
+        and energy, with the latter two binned for a combined 32 bands. These files are converted from
+        pickled files generated by pointlike by `data_management.ParquetConversion`
+
+        * `ft2`: Livetime from {ft2_size} monthly FT2-format files. The fields used are 
+        `['LIVETIME','RA_SCZ','DEC_SCZ', 'RA_ZENITH','DEC_ZENITH']`. <br>These files are processed by
+        data_management.TimedData._process_ft2.
+
+        * `binned`: The pointlike-format binned data, used to obtain the GTI info.
+
+        * `aeff`: Contains one or more effective area IRF files, in the "FB" format.
+
+        * `sources`: Files specific to the data in a cone about a source position are here, described 
+        in the next section
+
+        """
+        #-------------------------------------------------------------------
+        import glob
+        self.exroot = root = os.path.expandvars(self.root)
+        ls_root = self.shell(f'ls -l {root}')
+        du_command = f'(cd {root}; du  -d 1 .)'
+        du_result = self.shell(f'{du_command}')
+        ft2_size = len(glob.glob(root+'/ft2/*.fits'))
+        self.publishme()
+
+    def source_selection(self):
+        """Source Selection
+        """
+        self.publishme()
+    
+    def example(self):
+        """Example: Geminga
+
+        This shows the processing for the source Geminga. We find its position using astropy, the code
+        ```
+        gal = SkyCoord.from_name(self.example_source).galactic
+        l,b = (gal.l.value, gal.b.value)
+        ```
+        which results in $l,b$ = {l:.2f}, {b:.2f}
+
+        We use `pointlike` to generate a file that allows us to assign a weight to each photon, based on
+        its energy and band. For processing, this was copied to the folder `/tmp/weight_files`. For Geminga we have
+        {weight_file}
+
+        Then we use main.Main, generating the following:
+
+        {text}
+
+
+        """
+        from astropy.coordinates import SkyCoord
+        from lat_timing import Main
+        source_name = self.example_source
+        gal = SkyCoord.from_name(source_name).galactic
+        l,b = (gal.l.value, gal.b.value)
+        
+        weight_file = self.shell(f'ls -l /tmp/weight_files/{source_name}*')
+
+        with self.capture_print() as text:
+            self.tdata = Main( name=source_name, 
+                weight_file=f'/tmp/weight_files/',
+                parquet_root='$HOME/work/lat-data',
+                )
+
+                
+        self.publishme()
+
+    def get_files(self, mjd_range=None):
+        """ return lists of files to process
+        """
+        import glob
+    
+        data_files = sorted(glob.glob(os.path.expandvars(self.data_file_pattern)))
+        assert len(data_files)>0, 'No files found using pattern {}'.format(self.data_file_pattern)
+        if self.verbose>2:
+            gbtotal = np.array([os.stat(filename).st_size for filename in data_files]).sum()/2**30
+            print(f'Found {len(data_files)} monthly photon data files, with {gbtotal:.1f} GB total')
+
+        ft2_files = sorted(glob.glob(os.path.expandvars(self.ft2_file_pattern)))
+        gti_files = sorted(glob.glob(os.path.expandvars(self.gti_file_pattern)))
+        assert len(ft2_files)>0 and len(gti_files)>0, 'Fail to find FT2 or GTI files'
+        assert len(ft2_files)--len(gti_files), 'expect to find same number of FT2 and GTI files'
+
+        if mjd_range is not None:
+            mjd_range = np.array(mjd_range).clip(first_data, None)
+            tlim =Time(mjd_range, format='mjd').datetime
+            ylim,mlim = np.array([t.year for t in tlim])-2008, np.array([t.month for t in tlim])-1
+            year_range = ylim.clip(0, len(gti_files)) + np.array([0,1])
+            month_range = (ylim*12+mlim-8).clip(0,len(data_files)) + np.array([0,2]) #add 2 months?
+            if self.verbose>1:
+                print(f'From MJD range {mjd_range} select years {year_range}, months {month_range}')
+        else:
+            if self.verbose>2:
+                print('Loading all found data')
+
+        self.mjd_range = mjd_range # save for reference
+
+        return (data_files if mjd_range is None else data_files[slice(*month_range)], 
+                gti_files  if mjd_range is None else gti_files[slice(*year_range)], 
+                ft2_files  if mjd_range is None else ft2_files[slice(*year_range)],
+            )
+
+
+

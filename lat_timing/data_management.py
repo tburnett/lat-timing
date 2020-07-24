@@ -45,9 +45,18 @@ class TimedData(object):
         ('verbose',3,'verbosity level'),
         
         'File locations, as glob patterns',
-        ('data_file_pattern','$FERMI/data/P8_P305/time_info/month_*.pkl', 'monthly photon data files'),
-        ('ft2_file_pattern', '/nfs/farm/g/glast/g/catalog/P8_P305/ft2_20*.fits', 'yearly S/C history files'),
-        ('gti_file_pattern', '$FERMI/data/P8_P305/yearly/*.fits', 'glob pattern for yearly Files with GTI info'),
+        ('data_file_pattern', '$HOME/work/lat-data/binned',
+                                    #'$FERMI/data/P8_P305/time_info/month_*.pkl', 
+                                    'monthly photon data files'),
+        ('ft2_file_pattern',  '$HOME/work/lat-data/ft2/*.fits',  
+                                  #'/nfs/farm/g/glast/g/catalog/P8_P305/ft2_20*.fits', 
+                                    'yearly S/C history files'),
+        ('gti_file_pattern',   '$HOME/work/lat-data/binned/*.fits',
+                                #'$FERMI/data/P8_P305/yearly/*.fits', 
+                                    'glob pattern for yearly Files with GTI info'),
+        ('effective_area_path',      '$HOME/work/lat-data/aeff', 
+                                    'where to find AEFF IRF'),
+
         ('energy_edges', np.logspace(2,6,17), 'expected eneegy bins'),
         
         'S/C limits',
@@ -65,7 +74,7 @@ class TimedData(object):
         #('energy_domain', 'np.logspace(2,5,13)', 'energy bins for exposure calculation (expresson)'),
         ('bins_per_decade',4, 'binning for exposure intefral'),
         ('nside', 1024, 'HEALPix nside which was used to bin photon data positions'),
-        ('nest',   False, 'HEALPix used RIHG'),
+        ('nest',   False, 'HEALPix used RING'),
         ('ignore_gti', False, ''),
     )
 
@@ -404,7 +413,8 @@ class TimedData(object):
             edges=self.edges,
             binned_exposure=self.binned_exposure,
             interval = self.interval,
-            )     
+            )   
+              
         with open(filename, 'wb') as out:
             pickle.dump(dd, out)   
 
@@ -427,7 +437,7 @@ class TimedData(object):
         wts = base_spectrum(edom) 
 
         # effectivee area function from 
-        ea = EffectiveArea()
+        ea = EffectiveArea(file_path= self.effective_area_path)
 
         # a table of the weighted for each pair in livetime and pcosine arrays
         rvals = np.empty([len(wts),len(pcosine)]) 
@@ -583,8 +593,8 @@ class TimedData(object):
 #                 B= exp*self.B,               
 #                 )
 
-    def __len__(self):
-        return self.N
+    # def __len__(self):
+    #     return self.N
 
     def test_plots(self):
         """Make a set of plots of exposure, counts, properties of weights
@@ -626,7 +636,6 @@ class TimedDataX(TimedData):
         self.l,self.b = self.galactic
         if not hasattr(self, 'interval'): self.interval = 1 # should have saved
 
-data_root = '/nfs/farm/g/glast/u/burnett/analysis/lat_timing/data/'
 
 class TimedDataArrow(TimedData):
     """Subclass of TimedData that uses Arrow parquet storage, basically HDF5
@@ -635,22 +644,24 @@ class TimedDataArrow(TimedData):
     """
     
     defaults = TimedData.defaults\
-            +(('photon_dataset' ,data_root+'photon_dataset','parquet dataset'),
-              ('tstart_file', data_root+'tstart.pkl', 'dict of tstart values'),
-              ('nest', True, 'HEALPix NEST if true, not RING indexing'))
+            +(('parquet_root', '/nfs/farm/g/glast/u/burnett/analysis/lat_timing/data/',''),
+              ('photon_dataset' ,'photon_dataset','parquet dataset'),
+              ('tstart_file', 'tstart.pkl', 'dict of tstart values'),
+              ('nest', True, 'HEALPix NEST if true, not RING indexing'),
+            )
 
     
     @keyword_options.decorate( defaults)                    
     def __init__(self, setup, **kwargs):
         keyword_options.process(self, kwargs)
-        infile = self.tstart_file
+        infile = self.parquet_root+'/'+self.tstart_file
         with open(infile, 'rb') as inp:
             tstart_dict = pickle.load(inp)
         if self.verbose>0:
             print(f'Read {infile} with tstart values')  
 
         self.photon_data_source = dict(tstart_dict=tstart_dict, 
-                                       dataset=self.photon_dataset)
+                                       dataset=self.parquet_root+'/'+self.photon_dataset)
         super().__init__(setup, **kwargs)
         
     def _check_files(self, mjd_range):
