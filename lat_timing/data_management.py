@@ -413,7 +413,7 @@ class TimedData(object):
             edges=self.edges,
             binned_exposure=self.binned_exposure,
             interval = self.interval,
-            )   
+        )
               
         with open(filename, 'wb') as out:
             pickle.dump(dd, out)   
@@ -430,8 +430,9 @@ class TimedData(object):
         loge1=np.log10(emin); loge2=np.log10(emax)
         
         edom=np.logspace(loge1, loge2, int((loge2-loge1)*self.bins_per_decade+1))
-        if self.verbose>2:
-            print(f'exposure using energy domain {edom}')
+        if self.verbose>1:
+            print(f'Calculate exposure using the energy domain'\
+                  f' {emin} to {emax}, {self.bins_per_decade} bins/decade' )
         base_spectrum = eval(self.base_spectrum) #lambda E: (E/1000)**-2.1 
         assert base_spectrum(1000)==1.
         wts = base_spectrum(edom) 
@@ -462,6 +463,7 @@ class TimedData(object):
         fields    = ['LIVETIME','RA_SCZ','DEC_SCZ', 'RA_ZENITH','DEC_ZENITH'] 
         if self.verbose>1:
             print(f'Processing {len(ft2_files)} S/C history (FT2) files')
+            print(f'  applying cuts cos(theta) < {self.cos_theta_max},  z < {self.z_max}')
         sc_data=[]
         for filename in ft2_files:
             with fits.open(filename) as hdu:
@@ -624,7 +626,7 @@ class TimedDataX(TimedData):
     """
 
     def __init__(self, filename):
-        with open(filename, 'rb') as inp:
+        with open(os.path.expandvars(filename), 'rb') as inp:
             pkl = pickle.load(inp)
         keys = list(pkl.keys())
         # convert recarray objects back to DataFrame
