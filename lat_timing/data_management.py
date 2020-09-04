@@ -413,7 +413,7 @@ class TimedData(object):
             edges=self.edges,
             binned_exposure=self.binned_exposure,
             interval = self.interval,
-        )
+            )   
               
         with open(filename, 'wb') as out:
             pickle.dump(dd, out)   
@@ -432,7 +432,7 @@ class TimedData(object):
         edom=np.logspace(loge1, loge2, int((loge2-loge1)*self.bins_per_decade+1))
         if self.verbose>1:
             print(f'Calculate exposure using the energy domain'\
-                  f' {emin} to {emax}, {self.bins_per_decade} bins/decade' )
+                  f' {emin}-{emax} {self.bins_per_decade} bins/decade' )
         base_spectrum = eval(self.base_spectrum) #lambda E: (E/1000)**-2.1 
         assert base_spectrum(1000)==1.
         wts = base_spectrum(edom) 
@@ -626,7 +626,7 @@ class TimedDataX(TimedData):
     """
 
     def __init__(self, filename):
-        with open(os.path.expandvars(filename), 'rb') as inp:
+        with open(filename, 'rb') as inp:
             pkl = pickle.load(inp)
         keys = list(pkl.keys())
         # convert recarray objects back to DataFrame
@@ -775,7 +775,7 @@ def testdata(**kwargs):
     return TimedData(setup)
 
 #####################################################################################
-#    Parquet code -- TODO just copied, need to test.
+#    Parquet code 
 #           from notebooks/code development/parquet_writer.ipynb
 
 class ParquetConversion(object):
@@ -784,14 +784,17 @@ class ParquetConversion(object):
 
     
     def __init__(self, 
-                 data_file_pattern ='$FERMI/data/P8_P305/time_info/month_*.pkl',
-            dataset = '/nfs/farm/g/glast/u/burnett/analysis/lat_timing/data/photon_dataset'):
+            data_file_pattern ='/nfs/farm/g/glast/g/catalog/pointlike/fermi/data/P8_P305/time_info/month_*.pkl',
+            dataset = '$WORK/lat-data/photon_dataset'):
 
+        print(f'ParquetConversion:\n'\
+            f'\n from \t{data_file_pattern}\n to \t{dataset}')
         self.files = sorted(glob.glob(os.path.expandvars(data_file_pattern)));
         print(f'Found {len(self.files)} monthly files with pattern {data_file_pattern}'\
              f'\nWill store parquet files here: {dataset}')
+        dataset = os.path.expandvars(dataset)
         if os.path.exists(dataset):
-            print(f'Dataset folder {dataset} exists')
+            print(f'Dataset folder "{dataset}" exists')
         else:
             os.makedirs(dataset)
         self.dataset=dataset
@@ -804,19 +807,26 @@ class ParquetConversion(object):
         dataset=self.dataset
         nside=1024
     
-        def convert(month):
+        self.tstart_dict = {}
 
-            infile = files[month-1]
-            print(month, end=',')
-            #print(f'Reading file {os.path.split(infile)[-1]} size {os.path.getsize(infile):,}' )   
+        def convert(infile): #month):
+
+            # parse month index from the file, must end with "_mmm.pkl"
+            month = infile[:infile.find('.pkl')].split('_')[-1]
+            imonth = np.uint8(month)
+            print(month, end=', ')
+            print(f'Reading file {os.path.split(infile)[-1]} size {os.path.getsize(infile):,}' )   
 
             with open(infile, 'rb') as inp:
                 t = pickle.load(inp,encoding='latin1')
 
+            # extract tstart--need to keep track
+            self.tstart_dict[imonth]=t['tstart']
+
             # convert to DataFrame, add month index as new column for partition, then make a Table
             df = pd.DataFrame(t['timerec'])
-            tstart = t['tstart']
-            df['month']= np.uint8(month)
+
+            df['month']= imonth
             # add a columb with nest indexing -- makes the ring redundant, may remove later
             df['nest_index'] = healpy.ring2nest(nside, df.hpindex).astype(np.int32)
             table = pa.Table.from_pandas(df, preserve_index=False)
@@ -824,5 +834,5 @@ class ParquetConversion(object):
             # add to partitioned dataset
             pq.write_to_dataset(table, root_path=dataset, partition_cols=['month'] )
 
-        for i in range(len(files)):
-            convert(month=i+1)
+        for f in sorted(self.files):
+            convert(f)
